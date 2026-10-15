@@ -72,6 +72,7 @@ export class MeshRuntime {
   private readonly local: LocalConnection;
   private stopWatchingConfig: (() => void) | null = null;
   private localServerId: string | null = null;
+  private localHostname: string;
   readonly ready: Promise<void>;
   private resolveReady!: () => void;
 
@@ -101,6 +102,7 @@ export class MeshRuntime {
       ),
     );
     this.localServerId = readLocalServerId(this.paseoHome);
+    this.localHostname = readLocalHostname(this.paseoHome) ?? os.hostname();
     this.local = new LocalConnection({
       paseoHome: this.paseoHome,
       clientId: `paseo-mesh-local:${this.localServerId ?? "unknown"}`,
@@ -113,7 +115,7 @@ export class MeshRuntime {
       appVersion: PASEO_CLIENT_APP_VERSION,
       localApi: () => this.local.api(),
       localServerId: () => this.localServerId,
-      localHostname: () => os.hostname(),
+      localHostname: () => this.localHostname,
       localVersion: () => null,
       onPeerConnected: () => this.watches.poke(),
       retry: options.retry,
@@ -287,7 +289,7 @@ export class MeshRuntime {
       watches: this.watches,
       resolveCaller: (caller) => this.callers.resolve(caller),
       localServerId: () => this.localServerId,
-      localHostname: () => os.hostname(),
+      localHostname: () => this.localHostname,
     });
   }
 
@@ -465,6 +467,19 @@ function peersMissingIds(raw: unknown): boolean {
     Array.isArray(peers) &&
     peers.some((peer) => typeof peer === "object" && peer !== null && !("id" in peer))
   );
+}
+
+/** The daemon's own display name, as peers see it in server_info. */
+function readLocalHostname(paseoHome: string | null): string | null {
+  if (!paseoHome) return null;
+  try {
+    const pid = JSON.parse(readFileSync(path.join(paseoHome, "paseo.pid"), "utf8")) as {
+      hostname?: unknown;
+    };
+    return typeof pid.hostname === "string" && pid.hostname ? pid.hostname : null;
+  } catch {
+    return null;
+  }
 }
 
 function readLocalServerId(paseoHome: string | null): string | null {

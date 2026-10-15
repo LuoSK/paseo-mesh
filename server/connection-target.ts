@@ -1,7 +1,9 @@
+import type { ConnectionOffer } from "@getpaseo/protocol/connection-offer";
 import { parseConnectionOfferFromUrl } from "@getpaseo/protocol/connection-offer";
 import {
   buildDaemonWebSocketUrl,
   buildRelayWebSocketUrl,
+  parseRelayConnectionUri,
   shouldUseTlsForDefaultHostedRelay,
 } from "@getpaseo/protocol/daemon-endpoints";
 
@@ -13,6 +15,8 @@ export type ConnectionTarget =
       serverId: string;
       daemonPublicKeyB64: string;
       endpoint: string;
+      /** Password embedded in a relay:// URI, used when the peer has none configured. */
+      password?: string;
     }
   | { kind: "direct"; url: string; endpoint: string };
 
@@ -32,18 +36,17 @@ export function parseConnectionTarget(input: string): ConnectionTarget {
       throw new Error(`Invalid pairing offer URL: ${describe(error)}`);
     }
     if (!offer) throw new Error("Invalid pairing offer URL");
-    return {
-      kind: "relay",
-      url: buildRelayWebSocketUrl({
-        endpoint: offer.relay.endpoint,
-        serverId: offer.serverId,
-        role: "client",
-        useTls: offer.relay.useTls ?? shouldUseTlsForDefaultHostedRelay(offer.relay.endpoint),
-      }),
-      serverId: offer.serverId,
-      daemonPublicKeyB64: offer.daemonPublicKeyB64,
-      endpoint: offer.relay.endpoint,
-    };
+    return relayTarget(offer);
+  }
+
+  if (/^relay:\/\//i.test(value) || value.includes("#connect=")) {
+    let parsed: ReturnType<typeof parseRelayConnectionUri>;
+    try {
+      parsed = parseRelayConnectionUri(value);
+    } catch (error) {
+      throw new Error(`Invalid relay connection URI: ${describe(error)}`);
+    }
+    return relayTarget(parsed.offer, parsed.password);
   }
 
   if (/^wss?:\/\//i.test(value)) {
@@ -59,7 +62,7 @@ export function parseConnectionTarget(input: string): ConnectionTarget {
 
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
     throw new Error(
-      "Unsupported connection. Use a pairing offer URL, host:port, ws:// or wss:// (forward SSH yourself with ssh -L).",
+      "Unsupported connection. Use a pairing offer URL, relay://, host:port, ws:// or wss:// (forward SSH yourself with ssh -L).",
     );
   }
 
@@ -72,6 +75,22 @@ export function parseConnectionTarget(input: string): ConnectionTarget {
   } catch (error) {
     throw new Error(`Invalid host:port endpoint "${value}": ${describe(error)}`);
   }
+}
+
+function relayTarget(offer: ConnectionOffer, password?: string): ConnectionTarget {
+  return {
+    kind: "relay",
+    url: buildRelayWebSocketUrl({
+      endpoint: offer.relay.endpoint,
+      serverId: offer.serverId,
+      role: "client",
+      useTls: offer.relay.useTls ?? shouldUseTlsForDefaultHostedRelay(offer.relay.endpoint),
+    }),
+    serverId: offer.serverId,
+    daemonPublicKeyB64: offer.daemonPublicKeyB64,
+    endpoint: offer.relay.endpoint,
+    ...(password ? { password } : {}),
+  };
 }
 
 /** Display form that never includes the offer payload or key. */

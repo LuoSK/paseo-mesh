@@ -660,3 +660,47 @@ describe("configuration file", () => {
     }
   });
 });
+
+describe.runIf(process.env.MESH_E2E_RELAY === "1")("relay (uses relay.paseo.sh)", () => {
+  let r: TestDaemon;
+
+  beforeAll(async () => {
+    r = await TestDaemon.start({ name: "r", plugins: [ECHO_PROVIDER_DIR], relay: true });
+  });
+
+  afterAll(async () => {
+    await r?.destroy();
+  });
+
+  it("connects through a pairing offer and a relay:// URI with end-to-end encryption", async () => {
+    const pairing = JSON.parse(await r.cli(["daemon", "pair", "--relay", "--json"])) as {
+      url: string;
+      connectionUri: string;
+    };
+    const viaOffer = await addPeer("relay-offer", pairing.url);
+    expect(viaOffer.kind).toBe("relay");
+    const online = await waitStatus("relay-offer", "online", 60_000);
+    expect(online.serverId).toBe(r.serverId);
+
+    const rApi = await r.api();
+    const remoteId = await createEchoAgent(rApi, {
+      cwd: workB,
+      title: "via-relay",
+      prompt: "over relay",
+    });
+    const client = await mcp();
+    const timeline = await callTool<{ items: Array<{ text?: string }> }>(
+      client,
+      "mesh_read_timeline",
+      {
+        host: "relay-offer",
+        agentId: remoteId,
+      },
+    );
+    expect(timeline.items.map((item) => item.text)).toContain("Echo: over relay");
+
+    await a.rpc("mesh.peers.remove", { id: viaOffer.id });
+    await addPeer("relay-uri", pairing.connectionUri);
+    await waitStatus("relay-uri", "online", 60_000);
+  });
+});

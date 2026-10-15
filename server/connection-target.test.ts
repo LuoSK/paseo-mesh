@@ -48,6 +48,26 @@ describe("parseConnectionTarget", () => {
     expect(parseConnectionTarget("ws://box.lan:7000/ws").url).toBe("ws://box.lan:7000/ws");
   });
 
+  it("parses relay:// connection URIs, including an embedded password", () => {
+    const uri = `relay://relay.paseo.sh:443/srv_TESTSERVER01?key=${encodeURIComponent(offer.daemonPublicKeyB64)}&ssl=true&password=pw123`;
+    const target = parseConnectionTarget(uri);
+    expect(target).toMatchObject({
+      kind: "relay",
+      serverId: "srv_TESTSERVER01",
+      daemonPublicKeyB64: offer.daemonPublicKeyB64,
+      password: "pw123",
+    });
+    expect(new URL(target.url).protocol).toBe("wss:");
+    const link = `https://app.paseo.sh/#connect=${encodeURIComponent(uri)}`;
+    expect(parseConnectionTarget(link)).toMatchObject({
+      kind: "relay",
+      serverId: "srv_TESTSERVER01",
+    });
+    expect(() => parseConnectionTarget("relay://relay.paseo.sh:443/srv_X")).toThrow(
+      /Invalid relay connection URI/,
+    );
+  });
+
   it("rejects unsupported schemes, empty input and malformed offers", () => {
     expect(() => parseConnectionTarget("ssh://me@box")).toThrow(/Unsupported connection/);
     expect(() => parseConnectionTarget("   ")).toThrow(/empty/);

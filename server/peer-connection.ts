@@ -187,6 +187,8 @@ export class PeerConnection {
     const target = this.target;
     if (!target) return;
     const generation = ++this.generation;
+    const password =
+      this.config.password ?? (target.kind === "relay" ? target.password : undefined);
     this.setState({ status: "connecting", attempt });
     const client = new DaemonClient({
       url: target.url,
@@ -195,7 +197,7 @@ export class PeerConnection {
       appVersion: this.options.appVersion,
       connectTimeoutMs: this.options.connectTimeoutMs ?? 15_000,
       reconnect: { enabled: false },
-      ...(this.config.password ? { password: this.config.password } : {}),
+      ...(password ? { password } : {}),
       ...(target.kind === "relay"
         ? { e2ee: { enabled: true, daemonPublicKeyB64: target.daemonPublicKeyB64 } }
         : {}),
@@ -206,9 +208,7 @@ export class PeerConnection {
       await client.connect();
       identity = await readIdentity(client, this.options.connectTimeoutMs ?? 15_000);
     } catch (error) {
-      const detail = client.lastError
-        ? `${messageOf(error)} (${client.lastError})`
-        : messageOf(error);
+      const detail = describeFailure(messageOf(error), client.lastError);
       await client.close().catch(() => {});
       if (generation !== this.generation) return;
       this.scheduleRetry(attempt, detail);
@@ -322,6 +322,13 @@ async function readIdentity(client: DaemonClient, timeoutMs: number): Promise<Se
     if (Date.now() > deadline) throw new Error("Daemon did not report its identity");
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+/** Combines the thrown message with the client's last error without repeating it. */
+export function describeFailure(message: string, lastError: string | null): string {
+  if (!lastError || message.includes(lastError)) return message;
+  if (lastError.includes(message)) return lastError;
+  return `${message} (${lastError})`;
 }
 
 export function messageOf(error: unknown): string {
