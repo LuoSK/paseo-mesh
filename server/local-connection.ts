@@ -37,11 +37,28 @@ export class LocalConnection {
   async api(): Promise<PaseoApi> {
     if (this.closed) throw new Error("paseo-mesh is stopping");
     if (this.provided) return this.provided;
-    if (this.own) return this.own.api;
+    return (await this.ownConnection()).api;
+  }
+
+  /**
+   * This daemon's own pairing offer, or null when its relay is off. Needs the owner-level
+   * session the local credential grants, which the API handed to plugins does not expose.
+   */
+  async pairingOffer(): Promise<string | null> {
+    const { client } = await this.ownConnection();
+    const offer = await client.getDaemonPairingOffer();
+    return offer.relayEnabled && offer.url.includes("#offer=") ? offer.url : null;
+  }
+
+  private async ownConnection(): Promise<{ client: DaemonClient; api: PaseoApi }> {
+    if (this.closed) throw new Error("paseo-mesh is stopping");
+    if (this.own) return this.own;
     this.connecting ??= this.connect().finally(() => {
       this.connecting = null;
     });
-    return this.connecting;
+    await this.connecting;
+    if (!this.own) throw new Error("The local daemon connection closed");
+    return this.own;
   }
 
   async close(): Promise<void> {

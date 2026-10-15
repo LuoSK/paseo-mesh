@@ -27,8 +27,15 @@ export const peerConfigSchema = z.object({
     .regex(/^peer_[a-z0-9]{8,32}$/)
     .default(() => newPeerId()),
   name: peerNameSchema,
-  /** Pairing offer URL, or a direct `host:port` / `ws://` / `wss://` endpoint. */
+  /** Pairing offer URL, `relay://`, `ssh://`, or a direct `host:port` / `ws://` / `wss://` endpoint. */
   connection: z.string().trim().min(1),
+  /**
+   * Daemon this peer must reach. Set for peers synced from the app; a different daemon behind
+   * the connection is rejected instead of silently used.
+   */
+  serverId: z.string().min(1).optional(),
+  /** `app:<appId>` for peers the app sync manages; absent for peers added by hand. */
+  origin: z.string().optional(),
   password: z.string().optional(),
   access: accessLevelSchema.default("read"),
   /** Absolute path prefixes on the peer where mesh may create agents. Empty means anywhere. */
@@ -60,6 +67,16 @@ export const injectionPatchSchema = z.object({
   preapproveProviders: z.array(z.string()).optional(),
 });
 
+export const appSyncConfigSchema = z.object({
+  /** Let the Paseo app keep this daemon's peers in step with the app's hosts. */
+  enabled: z.boolean().default(false),
+  /** Access given to peers the sync adds. */
+  access: accessLevelSchema.default("read"),
+  /** Server IDs whose synced peer the user removed; the sync does not add them back. */
+  excluded: z.array(z.string()).default([]),
+});
+export type AppSyncConfig = z.infer<typeof appSyncConfigSchema>;
+
 export const meshConfigSchema = z
   .object({
     version: z.literal(1).default(1),
@@ -67,6 +84,7 @@ export const meshConfigSchema = z
     /** Access granted to the orchestrating host itself through the `local` name. */
     localAccess: accessLevelSchema.default("write"),
     injection: injectionConfigSchema.default(injectionConfigSchema.parse({})),
+    appSync: appSyncConfigSchema.default(appSyncConfigSchema.parse({})),
   })
   .superRefine((config, ctx) => {
     const names = new Set<string>();
@@ -100,7 +118,7 @@ export const peerSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   local: z.boolean(),
-  kind: z.enum(["local", "relay", "direct"]),
+  kind: z.enum(["local", "relay", "direct", "ssh"]),
   endpoint: z.string(),
   access: accessLevelSchema,
   allowedPaths: z.array(z.string()),
@@ -111,5 +129,7 @@ export const peerSummarySchema = z.object({
   serverId: z.string().nullable(),
   hostname: z.string().nullable(),
   version: z.string().nullable(),
+  /** True for peers the app sync manages. */
+  synced: z.boolean(),
 });
 export type PeerSummary = z.infer<typeof peerSummarySchema>;

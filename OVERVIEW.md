@@ -6,7 +6,7 @@ New agents on this host get a `mesh` MCP server served by the plugin on 127.0.0.
 
 ## Setup
 
-Mesh keeps its own list of peers; hosts you added to the app are not reachable by agents until you add them here. Copy each machine's pairing link from Settings, that host, Pair device in the app (or run `paseo daemon pair` on it), then add it under Settings, Plugins, mesh, Peers. The Peers screen lists the app's hosts that mesh cannot reach yet. Direct `host:port` connections work on Tailscale or a LAN; set a daemon password on the peer and enter it here.
+Agents reach only the hosts in mesh's peer list. Under Settings, Plugins, mesh, Peers, turn on Keep peers in step with this app's hosts to sync that list with the app's Hosts while the desktop or web app is open, including on headless servers you reach from the app. You can also add peers by hand: a machine's pairing link from Settings, that host, Pair device (or `paseo daemon pair` on it), a `host:port` on Tailscale or a LAN with the daemon password, or an `ssh://user@host` address that uses the daemon user's SSH keys.
 
 Each peer is read-only by default. Grant write access to let agents create and control agents there, and add allowed paths to keep them in specific directories. Open Mesh in the sidebar to see every host and its agents.
 
@@ -14,7 +14,7 @@ Requires Paseo 0.11.0 or newer on this host.
 
 ## What it reads and stores
 
-Offers and passwords are stored on this host in `paseo-mesh/config.json` under the Paseo home, readable only by the daemon user, and are never sent to the app. A pairing offer or password gives full control of that daemon; mesh enforces read and write access and allowed paths for its tools, but they are guardrails, not a sandbox.
+When app host sync is on, the plugin reads the app's stored host list, including relay keys and passwords, beyond the plugin API, and sends it to the mesh daemons. Offers and passwords are stored on this host in `paseo-mesh/config.json` under the Paseo home, readable only by the daemon user, and are never sent to the app. A pairing offer or password gives full control of that daemon; mesh enforces read and write access and allowed paths for its tools, but they are guardrails, not a sandbox.
 
 ## Limits
 

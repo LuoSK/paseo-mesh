@@ -62,19 +62,37 @@ Update later with `paseo plugin update mesh`.
 
 ## Connect your hosts
 
-Mesh keeps its own list of peers. Hosts you added to the Paseo app are not peers until you add them here, and agents can only reach the hosts in this list. The Peers settings screen lists the app's hosts that mesh cannot reach yet.
+Agents can only reach the hosts in mesh's peer list. There are two ways to fill it.
 
-Get a pairing link for each machine you want to reach, either in the app (**Settings → that host → Pair device**, copy the link) or on the machine itself:
+### Sync the hosts from the app
+
+Under **Settings → Plugins → mesh → Peers → Sync hosts from this app**, turn on **Keep peers in step with this app's hosts**. While the Paseo desktop or web app is open, mesh then keeps its peers in step with the app's Hosts list: hosts you add to the app become peers, connection changes follow, and hosts you remove from the app are removed again. Peers you added by hand are never touched, and a synced peer you remove by hand is not synced back until you ask for it. Synced peers get the access you choose for the sync (read by default).
+
+Every host that runs mesh syncs its own peers this way, including headless servers: the app you use to reach a Linux box keeps that box's mesh in step too. For each host, mesh picks a connection that works from the daemon doing the connecting:
+
+1. the app's relay connection (pairing link),
+2. the host's own pairing link, published by its mesh when its relay is on (this is how a headless server reaches the laptop the app runs on),
+3. a direct `host:port` the daemon can route to (loopback addresses only count for daemons on the app's machine),
+4. SSH, using the daemon user's own SSH keys and config.
+
+Hosts with no usable connection are listed under **Not synced** with the reason.
+
+The sync reads the app's stored host list, which Paseo does not expose to plugins, so it works only in the desktop and web apps, and a future Paseo version could change that storage; mesh then stops syncing and reports the problem instead of guessing. Passwords stored in the app are copied into mesh's peer config on each daemon.
+
+### Add peers yourself
+
+Get a pairing link for each machine, either in the app (**Settings → that host → Pair device**) or on the machine:
 
 ```bash
 paseo daemon pair            # prints https://app.paseo.sh/#offer=...
 ```
 
-Treat the link like a password: it lets its holder control that daemon. Then add the peer on the orchestrating host, either in the app (**Settings → Plugins → mesh → Peers → Add a peer**) or from a terminal:
+Treat the link like a password: it lets its holder control that daemon. Then add the peer in the app (**Settings → Plugins → mesh → Peers → Add a peer**) or from a terminal:
 
 ```bash
 npx paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
 npx paseo-mesh peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
+npx paseo-mesh peers add devbox 'ssh://dev@devbox-cn?daemonPort=6767'
 npx paseo-mesh status
 ```
 
@@ -82,7 +100,7 @@ npx paseo-mesh status
 | --- | --- |
 | `https://app.paseo.sh/#offer=…` or `relay://…` | The peer can reach the internet. Works behind NAT and firewalls; traffic is end-to-end encrypted. Self-hosted relays work too: the offer carries the relay address. |
 | `host:port`, `ws://…`, `wss://…` | The hosts share a network (Tailscale, LAN, VPN, reverse proxy). Set a daemon password on the peer and give it to mesh. |
-| SSH | Forward the port yourself (`ssh -N -L 7767:127.0.0.1:6767 box`) and add `127.0.0.1:7767`. |
+| `ssh://[user@]host[:port]?daemonPort=6767` | You already SSH into the machine. Mesh runs `ssh -W` to the daemon with the daemon user's keys, agent and `~/.ssh/config`, in batch mode, so the key must work without prompts. |
 
 Peers default to **read** access. Grant **write** to let agents create and control agents there, and add allowed paths to keep them in specific directories.
 
@@ -160,6 +178,7 @@ Hosts are addressed by name, peer id or daemon `serverId`; `local` is the orches
 ## Security
 
 - **Trust boundary.** A pairing offer or daemon password gives full control of that daemon. Paseo does not issue scoped credentials yet, so mesh enforces read/write access and allowed paths itself. They are guardrails for agents, not a sandbox: symlinks on the peer are not resolved.
+- **App host sync** reads the Paseo app's stored host list from inside the app, beyond the plugin API, and copies relay keys, endpoints and passwords to the daemons running mesh. It is off until you turn it on.
 - **Secrets stay on the host.** Offers and passwords live in `$PASEO_HOME/paseo-mesh/config.json` (mode 0600). RPCs and the status screen never return them.
 - **Local endpoint.** The MCP server listens on `127.0.0.1` with a random bearer token stored in `$PASEO_HOME/paseo-mesh/server.json` (0600). It is injected into agents' MCP config, which Paseo keeps in the agent record.
 - **Relay.** Relay traffic uses Paseo's end-to-end encryption; the relay sees only metadata. See Paseo's [security model](https://github.com/getpaseo/paseo/blob/main/SECURITY.md).
@@ -217,6 +236,7 @@ Run it with `npx paseo-mesh <command>`. Target another daemon with `--home <path
 ## Limitations
 
 - Agents created before mesh was installed do not have the tools. Create a new agent to use them.
+- App host sync needs the desktop or web app to be open, and the phone app cannot sync.
 - Files are not shared between hosts. Hand work over through git or messages.
 - Stopping turns on the local host is left to Paseo's own `cancel_agent` tool.
 - Running two installations of mesh on the same daemon is not supported; they would share one data directory.

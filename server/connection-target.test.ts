@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { describeConnection, parseConnectionTarget } from "./connection-target";
+import {
+  type ConnectionTarget,
+  describeConnection,
+  parseConnectionTarget,
+} from "./connection-target";
+
+function urlOf(target: ConnectionTarget): string {
+  return "url" in target ? target.url : "";
+}
 
 function offerUrl(payload: unknown): string {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -22,7 +30,7 @@ describe("parseConnectionTarget", () => {
       daemonPublicKeyB64: offer.daemonPublicKeyB64,
       endpoint: "relay.paseo.sh:443",
     });
-    const url = new URL(target.url);
+    const url = new URL(urlOf(target));
     expect(url.protocol).toBe("wss:");
     expect(url.searchParams.get("serverId")).toBe("srv_TESTSERVER01");
     expect(url.searchParams.get("role")).toBe("client");
@@ -32,7 +40,7 @@ describe("parseConnectionTarget", () => {
     const target = parseConnectionTarget(
       offerUrl({ ...offer, relay: { endpoint: "10.0.0.5:8080", useTls: false } }),
     );
-    expect(new URL(target.url).protocol).toBe("ws:");
+    expect(new URL(urlOf(target)).protocol).toBe("ws:");
   });
 
   it("parses host:port as a direct WebSocket endpoint", () => {
@@ -44,8 +52,10 @@ describe("parseConnectionTarget", () => {
   });
 
   it("keeps explicit ws:// and wss:// URLs and defaults the path to /ws", () => {
-    expect(parseConnectionTarget("wss://paseo.example.com").url).toBe("wss://paseo.example.com/ws");
-    expect(parseConnectionTarget("ws://box.lan:7000/ws").url).toBe("ws://box.lan:7000/ws");
+    expect(urlOf(parseConnectionTarget("wss://paseo.example.com"))).toBe(
+      "wss://paseo.example.com/ws",
+    );
+    expect(urlOf(parseConnectionTarget("ws://box.lan:7000/ws"))).toBe("ws://box.lan:7000/ws");
   });
 
   it("parses relay:// connection URIs, including an embedded password", () => {
@@ -57,7 +67,7 @@ describe("parseConnectionTarget", () => {
       daemonPublicKeyB64: offer.daemonPublicKeyB64,
       password: "pw123",
     });
-    expect(new URL(target.url).protocol).toBe("wss:");
+    expect(new URL(urlOf(target)).protocol).toBe("wss:");
     const link = `https://app.paseo.sh/#connect=${encodeURIComponent(uri)}`;
     expect(parseConnectionTarget(link)).toMatchObject({
       kind: "relay",
@@ -68,8 +78,20 @@ describe("parseConnectionTarget", () => {
     );
   });
 
+  it("parses ssh:// URIs with user, port and daemon port", () => {
+    expect(parseConnectionTarget("ssh://dev@devbox-cn:2222?daemonPort=7000")).toEqual({
+      kind: "ssh",
+      ssh: { host: "dev@devbox-cn", sshPort: 2222, daemonPort: 7000 },
+      endpoint: "ssh dev@devbox-cn:2222 → daemon port 7000",
+    });
+    expect(parseConnectionTarget("ssh://devbox-cn")).toMatchObject({
+      ssh: { host: "devbox-cn", daemonPort: 6767 },
+    });
+  });
+
   it("rejects unsupported schemes, empty input and malformed offers", () => {
-    expect(() => parseConnectionTarget("ssh://me@box")).toThrow(/Unsupported connection/);
+    expect(() => parseConnectionTarget("ftp://me@box")).toThrow(/Unsupported connection/);
+    expect(() => parseConnectionTarget("ssh://box?bad=1")).toThrow(/Invalid SSH connection/);
     expect(() => parseConnectionTarget("   ")).toThrow(/empty/);
     expect(() => parseConnectionTarget("https://app.paseo.sh/#offer=not-json")).toThrow(
       /Invalid pairing offer URL/,

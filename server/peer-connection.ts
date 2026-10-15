@@ -8,6 +8,7 @@ import {
   parseConnectionTarget,
 } from "./connection-target";
 import type { Logger } from "./logger";
+import { openSshTunnel, type SshTunnel } from "./ssh-tunnel";
 
 export interface ServerIdentity {
   serverId: string;
@@ -25,12 +26,20 @@ export interface PeerConnectionOptions {
   validateIdentity(peer: PeerConnection, identity: ServerIdentity): string | null;
   connectTimeoutMs?: number;
   retry?: { baseDelayMs: number; maxDelayMs: number };
+  /** Executable for ssh:// peers; defaults to `ssh` on PATH. */
+  sshCommand?: string;
 }
 
 type ConnectionState =
   | { status: "disabled" }
   | { status: "connecting"; attempt: number }
-  | { status: "online"; client: DaemonClient; api: PaseoApi; identity: ServerIdentity }
+  | {
+      status: "online";
+      client: DaemonClient;
+      api: PaseoApi;
+      identity: ServerIdentity;
+      tunnel: SshTunnel | null;
+    }
   | { status: "offline"; error: string; attempt: number }
   | { status: "error"; error: string };
 
@@ -115,6 +124,7 @@ export class PeerConnection {
     const connectionChanged = next.connection !== this.config.connection;
     const reconnect =
       connectionChanged ||
+      next.serverId !== this.config.serverId ||
       next.password !== this.config.password ||
       next.enabled !== this.config.enabled;
     this.config = next;
@@ -186,7 +196,7 @@ export class PeerConnection {
       id: this.config.id,
       name: this.config.name,
       local: false,
-      kind: this.target?.kind ?? (this.config.connection.includes("#offer=") ? "relay" : "direct"),
+      kind: this.target?.kind ?? "direct",
       endpoint: this.target ? describeConnection(this.target) : "invalid connection",
       access: this.config.access,
       allowedPaths: this.config.allowedPaths,
@@ -194,9 +204,14 @@ export class PeerConnection {
       hasPassword: Boolean(this.config.password),
       status: state.status,
       error: state.status === "offline" || state.status === "error" ? state.error : null,
-      serverId: identity?.serverId ?? (this.target?.kind === "relay" ? this.target.serverId : null),
+      serverId:
+        identity?.serverId ??
+        (this.target?.kind === "relay" ? this.target.serverId : null) ??
+        this.config.serverId ??
+        null,
       hostname: identity?.hostname ?? null,
       version: identity?.version ?? null,
+      synced: Boolean(this.config.origin),
     };
   }
 
@@ -207,8 +222,30 @@ export class PeerConnection {
     const password =
       this.config.password ?? (target.kind === "relay" ? target.password : undefined);
     this.setState({ status: "connecting", attempt });
+    let tunnel: SshTunnel | null = null;
+    let url: string;
+    if (target.kind === "ssh") {
+      try {
+        tunnel = await openSshTunnel(target.ssh, { command: this.options.sshCommand });
+      } catch (error) {
+        if (generation !== this.generation) return;
+        this.scheduleRetry(attempt, `SSH tunnel failed: ${messageOf(error)}`);
+        return;
+      }
+      if (generation !== this.generation) {
+        tunnel.close();
+        return;
+      }
+      url = `ws://${tunnel.endpoint}/ws`;
+    } else {
+      url = target.url;
+    }
+    const closeClient = async () => {
+      await client.close().catch(() => {});
+      tunnel?.close();
+    };
     const client = new DaemonClient({
-      url: target.url,
+      url,
       clientId: this.options.clientId,
       clientType: "cli",
       appVersion: this.options.appVersion,
@@ -225,22 +262,33 @@ export class PeerConnection {
       await client.connect();
       identity = await readIdentity(client, this.options.connectTimeoutMs ?? 15_000);
     } catch (error) {
-      const detail = describeFailure(messageOf(error), client.lastError);
-      await client.close().catch(() => {});
+      const sshFailure = tunnel?.failure();
+      const detail = sshFailure
+        ? `SSH: ${sshFailure}`
+        : describeFailure(messageOf(error), client.lastError);
+      await closeClient();
       if (generation !== this.generation) return;
       this.scheduleRetry(attempt, detail);
       return;
     }
     if (generation !== this.generation) {
-      await client.close().catch(() => {});
+      await closeClient();
       return;
     }
 
     if (target.kind === "relay" && identity.serverId !== target.serverId) {
-      await client.close().catch(() => {});
+      await closeClient();
       this.setState({
         status: "error",
         error: `Daemon reported ${identity.serverId} but the pairing offer is for ${target.serverId}`,
+      });
+      return;
+    }
+    if (this.config.serverId && identity.serverId !== this.config.serverId) {
+      await closeClient();
+      this.setState({
+        status: "error",
+        error: `Reached daemon ${identity.serverId}, but this peer is for ${this.config.serverId}`,
       });
       return;
     }
@@ -251,7 +299,7 @@ export class PeerConnection {
     }
     const rejection = this.options.validateIdentity(this, identity);
     if (rejection) {
-      await client.close().catch(() => {});
+      await closeClient();
       this.lastIdentity = identity;
       this.setState({ status: "error", error: rejection });
       return;
@@ -268,14 +316,14 @@ export class PeerConnection {
     } catch (error) {
       this.claimed = null;
       await api.dispose().catch(() => {});
-      await client.close().catch(() => {});
+      await closeClient();
       if (generation !== this.generation) return;
       this.scheduleRetry(attempt, messageOf(error));
       return;
     }
     if (generation !== this.generation) {
       await api.dispose().catch(() => {});
-      await client.close().catch(() => {});
+      await closeClient();
       return;
     }
     this.claimed = null;
@@ -285,11 +333,11 @@ export class PeerConnection {
         const reason = "reason" in status && status.reason ? status.reason : "connection lost";
         this.options.logger.warn(`Peer ${this.name} disconnected: ${reason}`);
         void api.dispose().catch(() => {});
-        void client.close().catch(() => {});
-        this.scheduleRetry(1, reason);
+        void closeClient();
+        this.scheduleRetry(1, tunnel?.failure() ? `SSH: ${tunnel.failure()}` : reason);
       }
     });
-    this.setState({ status: "online", client, api, identity });
+    this.setState({ status: "online", client, api, identity, tunnel });
     this.options.logger.info(
       `Peer ${this.name} online: ${identity.serverId} (${identity.hostname ?? "unknown host"})`,
     );
@@ -321,6 +369,7 @@ export class PeerConnection {
     if (state.status === "online") {
       await state.api.dispose().catch(() => {});
       await state.client.close().catch(() => {});
+      state.tunnel?.close();
     }
     return generation;
   }

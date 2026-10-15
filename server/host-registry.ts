@@ -45,6 +45,7 @@ export interface HostRegistryOptions {
   onPeerConnected?(peer: PeerConnection): void;
   connectTimeoutMs?: number;
   retry?: { baseDelayMs: number; maxDelayMs: number };
+  sshCommand?: string;
 }
 
 /**
@@ -96,6 +97,7 @@ export class HostRegistry {
         logger: this.options.logger,
         connectTimeoutMs: this.options.connectTimeoutMs,
         retry: this.options.retry,
+        ...(this.options.sshCommand ? { sshCommand: this.options.sshCommand } : {}),
         validateIdentity: (candidate, identity) => this.validateIdentity(candidate, identity),
         onConnected: (connected) => this.options.onPeerConnected?.(connected),
       });
@@ -212,6 +214,7 @@ export class HostRegistry {
       serverId: this.options.localServerId(),
       hostname: this.options.localHostname(),
       version: this.options.localVersion(),
+      synced: false,
     };
   }
 

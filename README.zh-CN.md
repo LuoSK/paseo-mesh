@@ -62,7 +62,24 @@ Paseo 自带的编排能力（`create_agent`、`send_agent_prompt`、完成通�
 
 ## 连接你的 host
 
-mesh 有自己的 peer 列表。你在 Paseo App 里添加的主机，要在这里加为 peer 之后 agent 才能访问；agent 只能访问列表里的 host。Peers 设置页会列出 App 里已连接、但 mesh 还不能访问的主机。
+agent 只能访问 mesh peer 列表里的 host。有两种方式填充这个列表。
+
+### 从 App 自动同步
+
+在 **Settings → Plugins → mesh → Peers → Sync hosts from this app** 里打开 **Keep peers in step with this app's hosts**。Paseo 桌面版或 Web 版开着的时候，mesh 会让自己的 peer 和 App 的主机列表保持一致：App 里新加的主机自动变成 peer，连接方式变了会跟着更新，从 App 删除的主机也会被移除。你手动加的 peer 不会被改动；同步来的 peer 被你手动删除后，除非你主动恢复，否则不会再同步回来。同步来的 peer 使用你为同步设置的权限，默认只读。
+
+每台装了 mesh 的 host 都会这样同步自己的 peer，headless 服务器也一样：你用来连 Linux 服务器的那个 App，会顺便把那台服务器上 mesh 的 peer 也同步好。对每台主机，mesh 会挑一种从发起连接的 daemon 那边连得通的方式：
+
+1. App 里的 relay 连接（配对链接）；
+2. 对方 mesh 发布的配对链接（对方开了 relay 时可用，headless 服务器就是靠它连回运行 App 的笔记本）；
+3. 发起方能直接路由到的 `host:port`（回环地址只对和 App 在同一台机器上的 daemon 有效）；
+4. SSH，使用 daemon 用户自己的 SSH 密钥和配置。
+
+没有可用连接方式的主机会列在 **Not synced** 里，并说明原因。
+
+同步读取的是 App 内部存储的主机列表，Paseo 没有把它开放给插件，所以只在桌面版和 Web 版可用。将来 Paseo 改了这个存储格式时，mesh 会停止同步并报告问题，不会去猜。App 里保存的主机密码会被复制到各台 daemon 的 mesh 配置里。
+
+### 手动添加
 
 给每台要访问的机器拿一个配对链接：可以在 App 里打开 **Settings → 那台主机 → Pair device** 复制链接，也可以在那台机器上运行：
 
@@ -75,6 +92,7 @@ paseo daemon pair            # 输出 https://app.paseo.sh/#offer=...
 ```bash
 npx paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
 npx paseo-mesh peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
+npx paseo-mesh peers add devbox 'ssh://dev@devbox-cn?daemonPort=6767'
 npx paseo-mesh status
 ```
 
@@ -82,7 +100,7 @@ npx paseo-mesh status
 | --- | --- |
 | `https://app.paseo.sh/#offer=…` 或 `relay://…` | peer 能出公网。在 NAT 和防火墙后面也能用，流量端到端加密。自建 relay 同样可用：offer 里带着 relay 地址。 |
 | `host:port`、`ws://…`、`wss://…` | 两台机器在同一网络（Tailscale、局域网、VPN、反向代理）。给 peer 设置 daemon 密码，并把密码填给 mesh。 |
-| SSH | 自己做端口转发（`ssh -N -L 7767:127.0.0.1:6767 box`），然后添加 `127.0.0.1:7767`。 |
+| `ssh://[user@]host[:port]?daemonPort=6767` | 你本来就能 SSH 到那台机器。mesh 用 `ssh -W` 连到 daemon，使用 daemon 用户的密钥、agent 和 `~/.ssh/config`，以批处理模式运行，所以密钥必须无需交互就能用。 |
 
 peer 默认是**只读**。授予**读写**后，agent 才能在那边创建和控制 agent；设置允许路径可以把它们限制在指定目录里。
 
@@ -143,6 +161,7 @@ To reply, call mesh_send_prompt with host "srv_…" and agentId "3f2c…".
 ## 安全
 
 - **信任边界。** 配对 offer 或 daemon 密码等于那台 daemon 的完全控制权。Paseo 目前还不能签发受限凭据，所以读写权限和允许路径由 mesh 自己执行。它们是给 agent 的护栏，不是沙箱：peer 上的符号链接不会被解析。
+- **App 主机同步**在 App 内部读取 Paseo 保存的主机列表（超出插件 API 的范围），并把 relay 密钥、地址和密码复制到运行 mesh 的 daemon 上。默认关闭。
 - **机密只留在本机。** offer 和密码保存在 `$PASEO_HOME/paseo-mesh/config.json`（权限 0600），RPC 和状态页面都不会返回它们。
 - **本地端点。** MCP server 只监听 `127.0.0.1`，使用随机 bearer token，保存在 `$PASEO_HOME/paseo-mesh/server.json`（0600）。这个 token 会注入到 agent 的 MCP 配置里，Paseo 把它保存在 agent 记录中。
 - **Relay。** relay 流量使用 Paseo 的端到端加密，relay 只能看到元数据。
@@ -150,6 +169,7 @@ To reply, call mesh_send_prompt with host "srv_…" and agentId "3f2c…".
 ## 限制
 
 - 安装插件之前创建的 agent 没有这些工具，需要新建 agent。
+- App 主机同步需要桌面版或 Web 版开着，手机 App 不能同步。
 - 不同 host 之间不共享文件，需要通过 git 或消息交接工作。
 - 停止本机上的回合请用 Paseo 自带的 `cancel_agent` 工具。
 - 不支持在同一个 daemon 上装两份 mesh，它们会共用一个数据目录。

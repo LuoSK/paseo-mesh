@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   callTool,
   callToolError,
@@ -23,9 +23,16 @@ interface PeerSummary {
   error: string | null;
   serverId: string | null;
   kind: string;
+  access: string;
+  synced: boolean;
 }
 
 interface Status {
+  appSync: {
+    enabled: boolean;
+    excluded: string[];
+    last: { error: string | null; added: string[]; removed: string[]; skipped: unknown[] } | null;
+  };
   hosts: PeerSummary[];
   configError: string | null;
   watches: number;
@@ -92,7 +99,11 @@ beforeAll(async () => {
   workA = tempDir("work-a");
   workB = tempDir("work-b");
   [a, b, c] = await Promise.all([
-    TestDaemon.start({ name: "a", plugins: [ROOT, ECHO_PROVIDER_DIR] }),
+    TestDaemon.start({
+      name: "a",
+      plugins: [ROOT, ECHO_PROVIDER_DIR],
+      env: { PASEO_MESH_SSH_COMMAND: path.join(ROOT, "test/fixtures/fake-ssh.mjs") },
+    }),
     TestDaemon.start({ name: "b", plugins: [ECHO_PROVIDER_DIR] }),
     TestDaemon.start({ name: "c", plugins: [ECHO_PROVIDER_DIR], password: PASSWORD }),
   ]);
@@ -253,7 +264,7 @@ describe("peers", () => {
   });
 
   it("validates connections and names before saving", async () => {
-    await expect(addPeer("bad", "ssh://me@box")).rejects.toThrow(/Unsupported connection/);
+    await expect(addPeer("bad", "ftp://me@box")).rejects.toThrow(/Unsupported connection/);
     await expect(addPeer("Local", b.endpoint)).rejects.toThrow();
     await addPeer("b", b.endpoint);
     await expect(addPeer("b", c.endpoint)).rejects.toThrow(/already exists/);
@@ -815,6 +826,124 @@ describe.runIf(process.env.MESH_E2E_RELAY === "1")("relay (uses relay.paseo.sh)"
     await a.rpc("mesh.peers.remove", { id: viaOffer.id });
     await addPeer("relay-uri", pairing.connectionUri);
     await waitStatus("relay-uri", "online", 60_000);
+  });
+});
+
+describe("app host sync", () => {
+  const appId = "app-e2etest01";
+
+  async function sync(hosts: unknown[], extra: Record<string, unknown> = {}) {
+    return a.rpc<{ applied: boolean; added: string[]; updated: string[]; removed: string[] }>(
+      "mesh.peers.sync",
+      { appId, hosts, ...extra },
+    );
+  }
+
+  beforeEach(async () => {
+    // Removing synced peers in the shared cleanup excludes them; start each case clean.
+    await a.rpc("mesh.settings.update", { appSync: { clearExcluded: true } });
+  });
+
+  afterEach(async () => {
+    await a.rpc("mesh.settings.update", { appSync: { enabled: false, access: "read" } });
+  });
+
+  it("does nothing until the user turns it on", async () => {
+    const result = await sync([{ serverId: b.serverId, label: "Box B", connection: b.endpoint }]);
+    expect(result.applied).toBe(false);
+    expect(await host("box-b")).toBeUndefined();
+  });
+
+  it("adds, updates and removes the hosts this app manages and leaves hand-added peers alone", async () => {
+    await a.rpc("mesh.settings.update", { appSync: { enabled: true, access: "write" } });
+    const manual = await addPeer("hand-c", c.endpoint, { password: PASSWORD });
+
+    const first = await sync([
+      { serverId: b.serverId, label: "Box B", connection: b.endpoint },
+      { serverId: c.serverId, label: "Box C", connection: c.endpoint, password: PASSWORD },
+      { serverId: a.serverId, label: "This host", connection: a.endpoint },
+    ]);
+    expect(first).toMatchObject({ applied: true, added: ["box-b"], removed: [] });
+    const boxB = await waitStatus("box-b", "online");
+    expect(boxB).toMatchObject({ synced: true, access: "write", serverId: b.serverId });
+    expect(await host("box-c")).toBeUndefined();
+    expect(await host("hand-c")).toMatchObject({ id: manual.id, synced: false });
+
+    const second = await sync([
+      { serverId: b.serverId, label: "Box B", connection: `ws://${b.endpoint}/ws` },
+    ]);
+    expect(second).toMatchObject({ updated: ["box-b"], removed: [] });
+    await waitStatus("box-b", "online");
+
+    const third = await sync([]);
+    expect(third.removed).toEqual(["box-b"]);
+    expect(await host("box-b")).toBeUndefined();
+    expect(await host("hand-c")).toBeDefined();
+  });
+
+  it("does not re-add a synced host the user removed until asked to", async () => {
+    await a.rpc("mesh.settings.update", { appSync: { enabled: true } });
+    const hosts = [{ serverId: b.serverId, label: "Box B", connection: b.endpoint }];
+    await sync(hosts);
+    const synced = await waitStatus("box-b", "online");
+    await a.rpc("mesh.peers.remove", { id: synced.id });
+    expect((await status()).appSync.excluded).toEqual([b.serverId]);
+    expect((await sync(hosts)).added).toEqual([]);
+    await a.rpc("mesh.settings.update", { appSync: { clearExcluded: true } });
+    expect((await sync(hosts)).added).toEqual(["box-b"]);
+  });
+
+  it("rejects a synced host whose connection reaches a different daemon", async () => {
+    await a.rpc("mesh.settings.update", { appSync: { enabled: true } });
+    await sync([{ serverId: "srv_notthisone", label: "Box X", connection: b.endpoint }]);
+    const wrong = await waitStatus("box-x", "error");
+    expect(wrong.error).toMatch(/Reached daemon .* but this peer is for srv_notthisone/);
+  });
+
+  it("records why the app could not sync", async () => {
+    await a.rpc("mesh.settings.update", { appSync: { enabled: true } });
+    await sync([], {
+      error: "The app's host list has an unexpected format",
+      skipped: [{ label: "Pipe", reason: "local pipe" }],
+    });
+    const last = (await status()).appSync.last;
+    expect(last).toMatchObject({
+      error: "The app's host list has an unexpected format",
+      skipped: [{ label: "Pipe" }],
+    });
+  });
+
+  it("describes this daemon for other hosts' syncs", async () => {
+    const self = await a.rpc<{ serverId: string; offerUrl: string | null }>(
+      "mesh.self.describe",
+      {},
+    );
+    expect(self.serverId).toBe(a.serverId);
+    // Relay is off for test daemons, so there is no offer to publish.
+    expect(self.offerUrl).toBeNull();
+  });
+});
+
+describe("ssh peers", () => {
+  it("reaches a daemon through an SSH tunnel", async () => {
+    const added = await addPeer("over-ssh", `ssh://tester@devbox?daemonPort=${b.port}`);
+    expect(added.kind).toBe("ssh");
+    const online = await waitStatus("over-ssh", "online");
+    expect(online.serverId).toBe(b.serverId);
+    const client = await mcp();
+    const listed = await callTool<{ agents: unknown[] }>(client, "mesh_list_agents", {
+      host: "over-ssh",
+    });
+    expect(Array.isArray(listed.agents)).toBe(true);
+  });
+
+  it("shows SSH's own error when authentication fails", async () => {
+    await addPeer("ssh-denied", "ssh://tester@denied-box");
+    const offline = await waitFor(async () => {
+      const entry = await host("ssh-denied");
+      return entry?.status === "offline" && entry.error ? entry : null;
+    });
+    expect(offline.error).toMatch(/Permission denied \(publickey\)/);
   });
 });
 

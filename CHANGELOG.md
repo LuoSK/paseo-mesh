@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-15
+
+### Added
+
+- App host sync: mesh keeps its peers in step with the Paseo app's Hosts list (desktop and web), adding, updating and removing the hosts the app manages. Works on every host running mesh, including headless servers reached from the app. Off by default.
+- `ssh://[user@]host[:port]?daemonPort=` peers, connected with `ssh -W` and the daemon user's SSH keys.
+- `mesh.self.describe`, which hands a daemon's own pairing offer to other hosts' syncs.
+- Peers pinned to a server ID refuse a connection that reaches a different daemon.
+
 ## [0.1.3] - 2026-10-15
 
 ### Added
@@ -47,7 +56,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Mesh screen, Peers settings screen and Command Center entries in the Paseo app.
 - `paseo-mesh` CLI for headless peer management.
 
-[Unreleased]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.0...v0.1.1

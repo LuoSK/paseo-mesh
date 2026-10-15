@@ -2,11 +2,13 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import {
   accessLevelSchema,
+  appSyncConfigSchema,
   injectionConfigSchema,
   injectionPatchSchema,
   peerNameSchema,
   peerSummarySchema,
 } from "./config";
+import { skippedHostSchema, syncedHostSchema } from "./sync";
 
 const peerIdSchema = z.object({ id: z.string().min(1) });
 
@@ -18,6 +20,19 @@ export const meshStatusRpc = defineRpc({
     hosts: z.array(peerSummarySchema),
     localAccess: accessLevelSchema,
     injection: injectionConfigSchema,
+    appSync: appSyncConfigSchema.extend({
+      excluded: z.array(z.string()),
+      last: z
+        .object({
+          at: z.string(),
+          error: z.string().nullable(),
+          added: z.array(z.string()),
+          updated: z.array(z.string()),
+          removed: z.array(z.string()),
+          skipped: z.array(skippedHostSchema),
+        })
+        .nullable(),
+    }),
     mcp: z.object({ url: z.string().nullable(), error: z.string().nullable() }),
     dataDirectory: z.string(),
     configError: z.string().nullable(),
@@ -69,8 +84,44 @@ export const updateSettingsRpc = defineRpc({
   input: z.object({
     localAccess: accessLevelSchema.optional(),
     injection: injectionPatchSchema.optional(),
+    appSync: z
+      .object({
+        enabled: z.boolean().optional(),
+        access: accessLevelSchema.optional(),
+        clearExcluded: z.boolean().optional(),
+      })
+      .optional(),
   }),
   output: z.object({ localAccess: accessLevelSchema, injection: injectionConfigSchema }),
+});
+
+/** This daemon's identity and pairing offer, for other hosts' syncs. */
+export const describeSelfRpc = defineRpc({
+  name: "mesh.self.describe",
+  input: z.object({}),
+  output: z.object({
+    serverId: z.string().nullable(),
+    hostname: z.string().nullable(),
+    offerUrl: z.string().nullable(),
+    appSyncEnabled: z.boolean(),
+  }),
+});
+
+/** Reconciles the peers this app manages with the app's host list. */
+export const syncPeersRpc = defineRpc({
+  name: "mesh.peers.sync",
+  input: z.object({
+    appId: z.string().regex(/^[a-z0-9-]{8,64}$/),
+    hosts: z.array(syncedHostSchema).max(500),
+    skipped: z.array(skippedHostSchema).max(500).default([]),
+    error: z.string().optional(),
+  }),
+  output: z.object({
+    applied: z.boolean(),
+    added: z.array(z.string()),
+    updated: z.array(z.string()),
+    removed: z.array(z.string()),
+  }),
 });
 
 export const meshAgentSchema = z.object({

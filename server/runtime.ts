@@ -15,16 +15,19 @@ import {
 } from "../shared/config";
 import {
   addPeerRpc,
+  describeSelfRpc,
   listMeshAgentsRpc,
   meshStatusRpc,
   removePeerRpc,
   retryPeerRpc,
+  syncPeersRpc,
   updatePeerRpc,
   updateSettingsRpc,
 } from "../shared/rpc";
+import { peerNameFor, type SkippedHost, type SyncedHost } from "../shared/sync";
 import { MESH_VERSION, PASEO_CLIENT_APP_VERSION } from "../shared/version";
 import { CALLER_ENV, CallerRegistry, callerFileSchema } from "./callers";
-import { parseConnectionTarget } from "./connection-target";
+import { describeConnection, parseConnectionTarget } from "./connection-target";
 import { ADD_HOST_GUIDANCE, HostRegistry } from "./host-registry";
 import { JsonFileStore } from "./json-store";
 import { LocalConnection } from "./local-connection";
@@ -119,6 +122,9 @@ export class MeshRuntime {
       localVersion: () => null,
       onPeerConnected: () => this.watches.poke(),
       retry: options.retry,
+      ...(process.env.PASEO_MESH_SSH_COMMAND
+        ? { sshCommand: process.env.PASEO_MESH_SSH_COMMAND }
+        : {}),
     });
     this.watches = new WatchManager({
       store: new JsonFileStore(path.join(this.dataDirectory, "watches.json"), watchFileSchema, () =>
@@ -170,8 +176,38 @@ export class MeshRuntime {
         ...(input.injection
           ? { injection: { ...config.injection, ...definedOnly(input.injection) } }
           : {}),
+        ...(input.appSync
+          ? {
+              appSync: {
+                ...config.appSync,
+                ...definedOnly({ enabled: input.appSync.enabled, access: input.appSync.access }),
+                ...(input.appSync.clearExcluded ? { excluded: [] } : {}),
+              },
+            }
+          : {}),
       }));
       return { localAccess: next.localAccess, injection: next.injection };
+    });
+    server.handle(describeSelfRpc, async (_input, { paseo }) => {
+      this.provideLocalApi(paseo);
+      await this.ready;
+      let offerUrl: string | null = null;
+      try {
+        offerUrl = await this.local.pairingOffer();
+      } catch (error) {
+        this.logger.warn(`Could not read this daemon's pairing offer: ${messageOf(error)}`);
+      }
+      return {
+        serverId: this.localServerId,
+        hostname: this.localHostname,
+        offerUrl,
+        appSyncEnabled: this.config.appSync.enabled,
+      };
+    });
+    server.handle(syncPeersRpc, async (input, { paseo }) => {
+      this.provideLocalApi(paseo);
+      await this.ready;
+      return this.syncPeers(input);
     });
     server.handle(listMeshAgentsRpc, async (input, { paseo }) => {
       this.provideLocalApi(paseo);
@@ -310,6 +346,7 @@ export class MeshRuntime {
       hosts: this.registry.summaries(),
       localAccess: this.config.localAccess,
       injection: this.config.injection,
+      appSync: { ...this.config.appSync, last: this.lastSync },
       mcp: { url: this.mcp?.url ?? null, error: this.mcpError },
       dataDirectory: this.dataDirectory,
       configError: this.configError,
@@ -381,10 +418,136 @@ export class MeshRuntime {
   async removePeer(id: string): Promise<boolean> {
     let removed = false;
     await this.mutateConfig((config) => {
-      removed = config.peers.some((peer) => peer.id === id);
-      return { ...config, peers: config.peers.filter((peer) => peer.id !== id) };
+      const peer = config.peers.find((candidate) => candidate.id === id);
+      removed = Boolean(peer);
+      // Removing a synced peer by hand means "stop syncing it", or the next sync re-adds it.
+      const serverId = peer?.origin ? this.peerServerId(peer) : null;
+      return {
+        ...config,
+        peers: config.peers.filter((candidate) => candidate.id !== id),
+        ...(serverId && !config.appSync.excluded.includes(serverId)
+          ? { appSync: { ...config.appSync, excluded: [...config.appSync.excluded, serverId] } }
+          : {}),
+      };
     });
     return removed;
+  }
+
+  /**
+   * Makes the peers this app manages match the app's host list: adds new hosts, updates
+   * connections and passwords that changed, removes hosts the app no longer has. Peers added
+   * by hand or by another app are never changed, and an excluded server is never re-added.
+   */
+  async syncPeers(input: {
+    appId: string;
+    hosts: SyncedHost[];
+    skipped: SkippedHost[];
+    error?: string;
+  }): Promise<{ applied: boolean; added: string[]; updated: string[]; removed: string[] }> {
+    const result = { added: [] as string[], updated: [] as string[], removed: [] as string[] };
+    if (!this.config.appSync.enabled) return { applied: false, ...result };
+    if (input.error) {
+      this.recordSync({ ...result, skipped: input.skipped, error: input.error });
+      return { applied: false, ...result };
+    }
+    const origin = `app:${input.appId}`;
+    await this.mutateConfig((config) => {
+      const peers = [...config.peers];
+      const incoming = new Map(
+        input.hosts
+          .filter(
+            (host) =>
+              host.serverId !== this.localServerId &&
+              !config.appSync.excluded.includes(host.serverId),
+          )
+          .map((host) => [host.serverId, host]),
+      );
+      const names = new Set(peers.map((peer) => peer.name));
+      for (const host of incoming.values()) {
+        const index = peers.findIndex((peer) => {
+          const serverId = this.peerServerId(peer);
+          // A peer that has not connected yet is matched by where it points.
+          return serverId === null
+            ? sameEndpoint(peer.connection, host.connection)
+            : serverId === host.serverId;
+        });
+        const existing = index === -1 ? undefined : peers[index];
+        if (existing) {
+          if (existing.origin !== origin) continue;
+          if (existing.connection !== host.connection || existing.password !== host.password) {
+            const next: PeerConfig = {
+              ...existing,
+              connection: host.connection,
+              serverId: host.serverId,
+            };
+            if (host.password) next.password = host.password;
+            else delete next.password;
+            peers[index] = next;
+            result.updated.push(existing.name);
+          }
+          continue;
+        }
+        const name = uniqueName(peerNameFor(host.label) || "host", names);
+        names.add(name);
+        peers.push({
+          id: newPeerId(),
+          name,
+          connection: host.connection,
+          ...(host.password ? { password: host.password } : {}),
+          serverId: host.serverId,
+          origin,
+          access: config.appSync.access,
+          allowedPaths: [],
+          enabled: true,
+        });
+        result.added.push(name);
+      }
+      const kept = peers.filter((peer) => {
+        const gone = peer.origin === origin && !incoming.has(this.peerServerId(peer) ?? "");
+        if (gone) result.removed.push(peer.name);
+        return !gone;
+      });
+      return { ...config, peers: kept };
+    });
+    this.recordSync({ ...result, skipped: input.skipped, error: null });
+    if (result.added.length + result.updated.length + result.removed.length > 0) {
+      this.logger.info(
+        `App sync: added ${result.added.length}, updated ${result.updated.length}, removed ${result.removed.length}`,
+      );
+    }
+    return { applied: true, ...result };
+  }
+
+  private lastSync: {
+    at: string;
+    error: string | null;
+    added: string[];
+    updated: string[];
+    removed: string[];
+    skipped: SkippedHost[];
+  } | null = null;
+
+  private recordSync(sync: {
+    error: string | null;
+    added: string[];
+    updated: string[];
+    removed: string[];
+    skipped: SkippedHost[];
+  }): void {
+    this.lastSync = { at: new Date().toISOString(), ...sync };
+  }
+
+  /** The daemon a peer stands for: its pinned serverId, else the one it last connected to. */
+  private peerServerId(peer: PeerConfig): string | null {
+    if (peer.serverId) return peer.serverId;
+    const live = this.registry.peerById(peer.id)?.identity?.serverId;
+    if (live) return live;
+    try {
+      const target = parseConnectionTarget(peer.connection);
+      return target.kind === "relay" ? target.serverId : null;
+    } catch {
+      return null;
+    }
   }
 
   provideLocalApi(api: PaseoApi): void {
@@ -486,6 +649,24 @@ function isMeshUrl(url: string, current: string): boolean {
     );
   } catch {
     return false;
+  }
+}
+
+function sameEndpoint(a: string, b: string): boolean {
+  try {
+    return (
+      describeConnection(parseConnectionTarget(a)) === describeConnection(parseConnectionTarget(b))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function uniqueName(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const candidate = `${base.slice(0, 60)}-${n}`;
+    if (!taken.has(candidate)) return candidate;
   }
 }
 

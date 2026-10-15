@@ -6,6 +6,7 @@ import {
   parseRelayConnectionUri,
   shouldUseTlsForDefaultHostedRelay,
 } from "@getpaseo/protocol/daemon-endpoints";
+import { parseSshTransportUri, type SshTransportTarget } from "@getpaseo/protocol/ssh-transport";
 
 export type ConnectionTarget =
   | {
@@ -18,7 +19,8 @@ export type ConnectionTarget =
       /** Password embedded in a relay:// URI, used when the peer has none configured. */
       password?: string;
     }
-  | { kind: "direct"; url: string; endpoint: string };
+  | { kind: "direct"; url: string; endpoint: string }
+  | { kind: "ssh"; ssh: SshTransportTarget; endpoint: string };
 
 /**
  * Accepts a pairing offer URL (`https://app.paseo.sh/#offer=...`), a `host:port` endpoint,
@@ -49,6 +51,17 @@ export function parseConnectionTarget(input: string): ConnectionTarget {
     return relayTarget(parsed.offer, parsed.password);
   }
 
+  if (/^ssh:\/\//i.test(value)) {
+    let ssh: SshTransportTarget;
+    try {
+      ssh = parseSshTransportUri(value);
+    } catch (error) {
+      throw new Error(`Invalid SSH connection: ${describe(error)}`);
+    }
+    const port = ssh.sshPort ? `:${ssh.sshPort}` : "";
+    return { kind: "ssh", ssh, endpoint: `ssh ${ssh.host}${port} → daemon port ${ssh.daemonPort}` };
+  }
+
   if (/^wss?:\/\//i.test(value)) {
     let url: URL;
     try {
@@ -62,7 +75,7 @@ export function parseConnectionTarget(input: string): ConnectionTarget {
 
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
     throw new Error(
-      "Unsupported connection. Use a pairing offer URL, relay://, host:port, ws:// or wss:// (forward SSH yourself with ssh -L).",
+      "Unsupported connection. Use a pairing offer URL, relay://, ssh://, host:port, ws:// or wss://.",
     );
   }
 

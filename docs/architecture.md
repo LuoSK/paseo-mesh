@@ -57,6 +57,16 @@ Tool calls without a bound caller still work; they just cannot arm notifications
 
 Mesh peers are separate from the hosts the app is connected to: the plugin client sees only the app hosts' ids, labels and status, never their connection details. An agent asked about a host mesh does not know will otherwise improvise, for example by driving the desktop app to copy a pairing link. `ADD_HOST_GUIDANCE` (`server/host-registry.ts`) is returned with `mesh_list_hosts`, in unknown-host errors and in the MCP instructions, and tells the agent to ask the user to add the host instead.
 
+## App host sync
+
+The app stores its Hosts list as JSON under `@paseo:daemon-registry` in AsyncStorage (localStorage on web and desktop), including relay keys, endpoints and passwords. The plugin API exposes only ids, labels and status, so `client/app-sync.ts` reads that storage directly. `shared/sync.ts` parses it with a schema that accepts the fields mesh needs; any other shape stops the sync with an error rather than writing peers from a misread list.
+
+Every host running mesh has its own plugin installation inside the app, and each installation syncs only its own daemon (`mesh.peers.sync`). Installations find each other through a registry on `globalThis`, so one can ask another for its daemon's pairing offer (`mesh.self.describe`, read over the local credential because the plugin API cannot reach `getDaemonPairingOffer`). That offer is how a headless server reaches the laptop the app runs on, which the app itself knows only by a loopback address or socket.
+
+The daemon owns reconciliation. Synced peers carry `origin: app:<appId>` and a pinned `serverId`; a sync adds, updates or removes only peers with its own origin. Peers added by hand are never touched, including one that has not connected yet, which is recognized by its endpoint. Removing a synced peer by hand records its `serverId` in `appSync.excluded` so the next sync does not add it back.
+
+`ssh://` peers run `ssh -W` per connection (`server/ssh-tunnel.ts`), the transport Paseo's CLI uses, with `BatchMode=yes` so a missing key fails with SSH's own message instead of waiting on a prompt.
+
 ## Peer connections
 
 Each peer gets a `DaemonClient` from `@getpaseo/client`, wrapped with `createPaseoApi`. The public `createPaseoClient` is not used because mesh needs `getLastServerInfoMessage` (identity), `cancelAgent` and the server-side `waitForFinish`, which only the internal client exposes.

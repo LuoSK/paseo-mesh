@@ -1,5 +1,6 @@
 import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
+import { startAppSync } from "./client/app-sync";
 import { MeshScreen } from "./client/mesh-screen";
 import { PeersSettings } from "./client/peers-settings";
 
@@ -43,5 +44,5 @@ export default function contribute(client: PluginClientContext) {
       openSettings("peers");
     },
   });
-  return () => {};
+  return startAppSync(client);
 }

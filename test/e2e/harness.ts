@@ -43,6 +43,8 @@ export interface StartOptions {
   plugins: string[];
   password?: string;
   relay?: boolean;
+  /** Extra environment for the daemon and its plugins. */
+  env?: Record<string, string>;
 }
 
 export class TestDaemon {
@@ -54,12 +56,13 @@ export class TestDaemon {
     readonly home: string,
     readonly port: number,
     readonly password: string | undefined,
+    private readonly env: Record<string, string>,
   ) {}
 
   static async start(options: StartOptions): Promise<TestDaemon> {
     const home = mkdtempSync(path.join(os.tmpdir(), `mesh-e2e-${options.name}-`));
     const port = await freePort();
-    const daemon = new TestDaemon(options.name, home, port, options.password);
+    const daemon = new TestDaemon(options.name, home, port, options.password, options.env ?? {});
     await writeFile(
       path.join(home, "config.json"),
       JSON.stringify({
@@ -92,7 +95,7 @@ export class TestDaemon {
   }
 
   async startProcess(): Promise<void> {
-    await this.cli(["daemon", "start", "--timeout", "120"]);
+    await this.cli(["daemon", "start", "--timeout", "120"], { env: cleanEnv(this.env) });
   }
 
   async stopProcess(): Promise<void> {

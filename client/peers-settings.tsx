@@ -13,6 +13,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { Text, View } from "react-native";
+import type { z } from "zod";
 import type { AccessLevel, PeerSummary } from "../shared/config";
 import {
   addPeerRpc,
@@ -22,6 +23,8 @@ import {
   updatePeerRpc,
   updateSettingsRpc,
 } from "../shared/rpc";
+import { peerNameFor } from "../shared/sync";
+import { canSyncAppHosts, syncNow } from "./app-sync";
 import { statusColor } from "./styles";
 
 const ACCESS_OPTIONS = [
@@ -78,7 +81,8 @@ export function PeersSettings({ theme }: PluginSurfaceProps) {
           <PeerCard key={peer.id} peer={peer} theme={theme} />
         ))}
       </SettingsSection>
-      {missing.length > 0 ? (
+      <AppSync appSync={status.data.appSync} theme={theme} />
+      {missing.length > 0 && !status.data.appSync.enabled ? (
         <AppHosts
           hosts={missing}
           theme={theme}
@@ -122,7 +126,10 @@ function PeerCard({ peer, theme }: { peer: PeerSummary; theme: PluginSurfaceProp
 
   return (
     <SettingsCard>
-      <SettingsRow label={peer.name} hint={peer.endpoint}>
+      <SettingsRow
+        label={peer.name}
+        hint={peer.synced ? `${peer.endpoint} · synced from the app` : peer.endpoint}
+      >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <View
             style={{
@@ -283,14 +290,91 @@ function AppHosts({
   );
 }
 
-/** Turns an app host label into a valid peer name, e.g. "Devbox CN" → "devbox-cn". */
-export function peerNameFor(label: string): string {
-  const name = label
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^[^a-z0-9]+|-+$/g, "")
-    .slice(0, 63);
-  return name && name !== "local" ? name : "";
+type AppSyncStatus = z.output<typeof meshStatusRpc.output>["appSync"];
+
+function AppSync({
+  appSync,
+  theme,
+}: {
+  appSync: AppSyncStatus;
+  theme: PluginSurfaceProps["theme"];
+}) {
+  const toast = useToast();
+  const refresh = useRefresh();
+  const updateSettings = useRpc(updateSettingsRpc);
+  const mutation = useMutation({
+    mutationFn: async (patch: Parameters<typeof updateSettings>[0]["appSync"]) => {
+      await updateSettings({ appSync: patch });
+      await syncNow?.();
+    },
+    onSuccess: () => void refresh(),
+    onError: (error) => toast.error(error.message),
+  });
+  const muted = { color: theme.colors.foregroundMuted, fontSize: 12 };
+  const danger = { color: theme.colors.statusDanger, fontSize: 12 };
+  const supported = canSyncAppHosts();
+  const last = appSync.last;
+  return (
+    <SettingsSection title="Sync hosts from this app">
+      <SettingsCard>
+        <SettingsSwitch
+          label="Keep peers in step with this app's hosts"
+          hint={
+            supported
+              ? "Adds the hosts this app is connected to, updates them when they change and removes them when you remove them from the app. Peers you added by hand are left alone."
+              : "Open the Paseo desktop or web app to sync; the phone app cannot read its host list."
+          }
+          value={appSync.enabled}
+          disabled={mutation.isPending}
+          onValueChange={(enabled) => mutation.mutate({ enabled })}
+        />
+        <SettingsSelect<AccessLevel>
+          label="Access for synced hosts"
+          hint="Applies to hosts the sync adds from now on"
+          value={appSync.access}
+          options={ACCESS_OPTIONS}
+          disabled={mutation.isPending}
+          onValueChange={(access) => mutation.mutate({ access })}
+        />
+        {appSync.enabled && supported ? (
+          <SettingsAction
+            label="Sync now"
+            hint={
+              last
+                ? `Last sync ${new Date(last.at).toLocaleTimeString()}: ${last.added.length} added, ${last.updated.length} updated, ${last.removed.length} removed`
+                : "Runs every 30 seconds while the app is open"
+            }
+            actionLabel="Sync"
+            disabled={mutation.isPending}
+            onPress={() => void syncNow?.().then(refresh)}
+          />
+        ) : null}
+        {last?.error ? <SettingsRow label="Sync problem" error={last.error} /> : null}
+        {last && last.skipped.length > 0 ? (
+          <SettingsRow label="Not synced">
+            <View style={{ gap: 2 }}>
+              {last.skipped.map((entry) => (
+                <Text key={entry.label} style={muted}>
+                  {entry.label}: {entry.reason}
+                </Text>
+              ))}
+            </View>
+          </SettingsRow>
+        ) : null}
+        {appSync.excluded.length > 0 ? (
+          <SettingsAction
+            label={`${appSync.excluded.length} removed host(s) are not synced again`}
+            actionLabel="Sync them again"
+            disabled={mutation.isPending}
+            onPress={() => mutation.mutate({ clearExcluded: true })}
+          />
+        ) : null}
+        {!supported && appSync.enabled ? (
+          <Text style={danger}>This app cannot read its host list here.</Text>
+        ) : null}
+      </SettingsCard>
+    </SettingsSection>
+  );
 }
 
 function AddPeer({ initialName }: { initialName: string }) {
