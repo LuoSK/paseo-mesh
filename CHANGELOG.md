@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Fixed
 
 - The npm package ships `npm-shrinkwrap.json`, so npm installs get the same exact runtime dependency tree as Git installs. The Paseo plugin directory requires this for npm artifacts.
+- A config reload triggered by the plugin's own write could apply a stale file over a newer peer update, briefly reverting settings such as allowed paths. Reloads and updates are now serialized.
 
 ### Changed
 

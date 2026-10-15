@@ -398,19 +398,21 @@ export class MeshRuntime {
   }
 
   private async mutateConfig(mutate: (config: MeshConfig) => MeshConfig): Promise<MeshConfig> {
-    const next = await this.configStore.update(mutate);
-    this.applyConfig(next);
-    return next;
+    return this.configStore.update(mutate, (next) => this.applyConfig(next));
   }
 
   private async reloadConfig(): Promise<void> {
     try {
-      let config = await this.configStore.read();
-      if (await this.configStore.rawMatches((raw) => peersMissingIds(raw))) {
-        // Persist IDs for hand-written peers so they stay stable across reloads.
-        config = await this.configStore.update((current) => current);
-      }
-      this.applyConfig(config);
+      // Locked so a reload triggered by an earlier write cannot apply a stale file over a
+      // newer update that landed in between.
+      await this.configStore.locked(async ({ write }) => {
+        const config = await this.configStore.read();
+        if (await this.configStore.rawMatches((raw) => peersMissingIds(raw))) {
+          // Persist IDs for hand-written peers so they stay stable across reloads.
+          await write(config);
+        }
+        this.applyConfig(config);
+      });
       this.configError = null;
     } catch (error) {
       // Keep running with the last good config; surface the problem in status.

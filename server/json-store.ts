@@ -48,14 +48,26 @@ export class JsonFileStore<T> {
     }
   }
 
-  /** Serialized read-modify-write so concurrent RPCs cannot lose each other's changes. */
-  update(mutate: (current: T) => T | Promise<T>): Promise<T> {
-    const next = this.queue.then(async () => {
-      const current = await this.read();
-      const value = this.schema.parse(await mutate(current));
+  /**
+   * Serialized read-modify-write so concurrent RPCs cannot lose each other's changes.
+   * `after` runs inside the same turn of the queue, so callers that mirror the file in memory
+   * apply values in the order they were written.
+   */
+  update(
+    mutate: (current: T) => T | Promise<T>,
+    after?: (value: T) => void | Promise<void>,
+  ): Promise<T> {
+    return this.locked(async () => {
+      const value = this.schema.parse(await mutate(await this.read()));
       await this.write(value);
+      await after?.(value);
       return value;
     });
+  }
+
+  /** Runs `fn` exclusively with respect to `update` and other `locked` calls. */
+  locked<R>(fn: (store: { write(value: T): Promise<void> }) => Promise<R>): Promise<R> {
+    const next = this.queue.then(() => fn({ write: (value) => this.write(value) }));
     this.queue = next.catch(() => {});
     return next;
   }

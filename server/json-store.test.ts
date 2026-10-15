@@ -68,6 +68,31 @@ describe("JsonFileStore", () => {
     });
   });
 
+  it("orders locked reloads and updates so a stale read never wins", async () => {
+    await store.update(() => ({ count: 1, names: [] }));
+    const applied: number[] = [];
+    let releaseReload: () => void = () => {};
+    const reloadGate = new Promise<void>((resolve) => {
+      releaseReload = resolve;
+    });
+    // A reload that read the file before an update lands must apply before that update.
+    const reload = store.locked(async () => {
+      const value = await store.read();
+      await reloadGate;
+      applied.push(value.count);
+    });
+    const update = store.update(
+      () => ({ count: 2, names: [] }),
+      (value) => {
+        applied.push(value.count);
+      },
+    );
+    releaseReload();
+    await Promise.all([reload, update]);
+    expect(applied).toEqual([1, 2]);
+    expect((await store.read()).count).toBe(2);
+  });
+
   it("notifies on external edits", async () => {
     await store.update(() => ({ count: 1, names: [] }));
     const changed = new Promise<void>((resolve) => {
