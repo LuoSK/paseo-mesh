@@ -821,8 +821,14 @@ describe.runIf(process.env.MESH_E2E_RELAY === "1")("relay (uses relay.paseo.sh)"
 describe("distribution", () => {
   it("installs from a Git source with its declared preparation step", async () => {
     const g = await TestDaemon.start({ name: "git", plugins: [] });
+    // CI checks out tags with a detached HEAD, which leaves a clone without origin/HEAD.
+    // Install from a clone of the current commit on a named branch, like a real remote.
+    const source = tempDir("git-source");
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("git", ["clone", "-q", ROOT, source]);
+    execFileSync("git", ["-C", source, "checkout", "-q", "-B", "mesh-e2e"]);
     try {
-      await g.cli(["plugin", "install", `file://${ROOT}`, "--json"]);
+      await g.cli(["plugin", "install", `file://${source}`, "--json"]);
       await g.waitForMesh();
       const client = await g.client();
       const plugins = await client.listPlugins();
@@ -833,6 +839,7 @@ describe("distribution", () => {
       );
     } finally {
       await g.destroy();
+      await rm(source, { recursive: true, force: true });
     }
   });
 });
