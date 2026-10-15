@@ -363,7 +363,7 @@ export function formatNotification(input: {
       "</permission-request>",
     );
     lines.push(
-      `Permission requests must be answered on host ${input.hostName}, in the Paseo app or with \`paseo --host <host> permit\`.`,
+      `Answer with mesh_respond_permission host="${input.hostName}" agentId="${input.agentId}", or in the Paseo app on that host.`,
     );
   }
   if (input.lastMessage) {

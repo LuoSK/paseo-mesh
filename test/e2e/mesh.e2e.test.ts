@@ -306,6 +306,9 @@ describe("access control", () => {
     expect(
       await callToolError(client, "mesh_create_agent", { ...create, cwd: "relative/dir" }),
     ).toMatch(/absolute path/);
+    expect(
+      await callToolError(client, "mesh_create_agent", { ...create, cwd: `${allowed}/../..` }),
+    ).toMatch(/outside the paths/);
     const created = await callTool<{ agentId: string; notifyOnFinish: boolean }>(
       client,
       "mesh_create_agent",
@@ -413,6 +416,55 @@ describe("cross-host orchestration", () => {
     });
     const note = await waitForNotification(parent, agentId);
     expect(note).toMatch(/errored|finished/);
+  });
+
+  it("forwards remote permission requests and lets the caller answer them", async () => {
+    await addPeer("b", b.endpoint);
+    await waitStatus("b", "online");
+    const parent = await orchestrator("parent-permission");
+    const client = await mcp(parent);
+    const { agentId } = await callTool<{ agentId: string }>(client, "mesh_create_agent", {
+      host: "b",
+      cwd: workB,
+      provider: ECHO_MODEL,
+      prompt: "PERMIT the release notes",
+    });
+    const ask = await waitForNotification(parent, "needs permission");
+    expect(ask).toContain(agentId);
+    expect(ask).toContain("<permission-request>");
+    expect(ask).toContain("Echo wants to write the release notes");
+    expect(ask).toContain("mesh_respond_permission");
+
+    const agent = await callTool<{ pendingPermissions: Array<{ id: string }> }>(
+      client,
+      "mesh_get_agent",
+      { host: "b", agentId },
+    );
+    const requestId = agent.pendingPermissions[0]?.id ?? "";
+    expect(
+      await callToolError(client, "mesh_respond_permission", {
+        host: "b",
+        agentId,
+        requestId: "not-a-request",
+        decision: "allow",
+      }),
+    ).toMatch(/No pending permission/);
+    await callTool(client, "mesh_respond_permission", {
+      host: "b",
+      agentId,
+      requestId,
+      decision: "allow",
+    });
+    const done = await waitForNotification(parent, `${agentId} (`);
+    await waitFor(
+      async () => {
+        const api = await a.api();
+        const all = await messages(api, parent);
+        return all.some((text) => text.includes(agentId) && text.includes("Permission allow"));
+      },
+      { message: "no finish notification after allowing" },
+    );
+    expect(done).toContain(agentId);
   });
 
   it("stops a running remote turn", async () => {

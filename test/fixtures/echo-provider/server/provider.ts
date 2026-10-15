@@ -4,6 +4,7 @@ import {
   type ProviderEvent,
   type ProviderInput,
   type ProviderMcpServerConfig,
+  type ProviderPermissionResponse,
   type ProviderPersistence,
   type ProviderRegistration,
   type ProviderSessionConfig,
@@ -16,8 +17,10 @@ import {
 //   FAIL <message>                 fail the turn
 //   ENV <name>                     reply with the session env value
 //   MCP <server> <tool> <json>     call an injected HTTP MCP tool, reply with its text
+//   PERMIT <text>                  ask for permission, reply with the decision
 
 const CAPABILITIES = [
+  "permission",
   "prompt.message",
   "session.archive",
   "session.list",
@@ -30,6 +33,7 @@ interface EchoSession {
   persistence: ProviderPersistence;
   turn: number;
   active: { turnId: string; cancel(): void } | null;
+  permissions: Map<string, (response: ProviderPermissionResponse) => void>;
 }
 
 interface State {
@@ -124,6 +128,7 @@ async function dispatch(input: ProviderInput, state: State): Promise<void> {
         persistence,
         turn: 0,
         active: null,
+        permissions: new Map(),
       });
       state.emit({
         type: "session.opened",
@@ -164,10 +169,22 @@ async function dispatch(input: ProviderInput, state: State): Promise<void> {
       state.emit({ type: "session.closed", sessionId: input.sessionId });
       state.emit({ type: "request.completed", requestId: input.requestId });
       return;
+    case "session.permission": {
+      const session = state.sessions.get(input.sessionId);
+      const resolve = session?.permissions.get(input.permissionId);
+      if (!session || !resolve) return;
+      session.permissions.delete(input.permissionId);
+      state.emit({
+        type: "session.permission_resolved",
+        sessionId: input.sessionId,
+        permissionId: input.permissionId,
+      });
+      resolve(input.response);
+      return;
+    }
     case "session.archive":
     case "session.unarchive":
     case "session.configure":
-    case "session.permission":
     case "session.revert":
       if ("requestId" in input)
         state.emit({ type: "request.completed", requestId: input.requestId });
@@ -270,6 +287,32 @@ async function prompt(
           };
         });
         finish({ reply: `Echo: ${rest.slice(1).join(" ")}` });
+        return;
+      }
+      case "PERMIT": {
+        const permissionId = `perm-${session.turn}`;
+        const text = rest.join(" ");
+        const decision = new Promise<ProviderPermissionResponse | null>((resolve) => {
+          session.permissions.set(permissionId, resolve);
+          wake = () => resolve(null);
+        });
+        state.emit({
+          type: "session.permission",
+          sessionId: input.sessionId,
+          request: {
+            id: permissionId,
+            name: "echo_write",
+            kind: "tool",
+            title: `Echo wants to write ${text}`,
+            input: { text },
+          },
+        });
+        const response = await decision;
+        finish({
+          reply: response
+            ? `Permission ${response.behavior}${response.behavior === "deny" && response.message ? `: ${response.message}` : ""}`
+            : "Permission canceled",
+        });
         return;
       }
       case "FAIL":

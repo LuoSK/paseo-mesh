@@ -125,7 +125,25 @@ const schemas = {
   }),
   stopAgent: z.object({ host: hostParam, agentId: agentIdParam }),
   archiveAgent: z.object({ host: hostParam, agentId: agentIdParam }),
+  respondPermission: z.object({
+    host: hostParam,
+    agentId: agentIdParam,
+    requestId: z
+      .string()
+      .min(1)
+      .describe("Permission request id from the notification or mesh_get_agent."),
+    decision: z.enum(["allow", "deny"]),
+    message: z.string().optional().describe("Reason shown to the agent when denying."),
+  }),
 };
+
+export const WRITE_TOOL_NAMES = [
+  "mesh_create_agent",
+  "mesh_send_prompt",
+  "mesh_stop_agent",
+  "mesh_archive_agent",
+  "mesh_respond_permission",
+] as const;
 
 export const READ_ONLY_TOOL_NAMES = [
   "mesh_list_hosts",
@@ -486,6 +504,40 @@ export function createMeshTools(context: ToolContext): McpTool[] {
     }),
 
     tool({
+      name: "mesh_respond_permission",
+      title: "Answer a permission request on a host",
+      description:
+        "Allow or deny a pending permission request of an agent on any host, e.g. after a needs-permission notification. Only answer requests you were asked to handle.",
+      schema: schemas.respondPermission,
+      readOnly: false,
+      async run(input) {
+        const { host, api } = await hostApi(input.host);
+        requireWrite(host);
+        const agent = await requireAgent(api, host, input.agentId);
+        if (!agent.pendingPermissions.some((request) => request.id === input.requestId)) {
+          const pending =
+            agent.pendingPermissions.map((request) => request.id).join(", ") || "none";
+          throw new Error(
+            `No pending permission ${input.requestId} on agent ${agent.id}. Pending: ${pending}`,
+          );
+        }
+        await api.agents.ref(agent.id).respondToPermission({
+          requestId: input.requestId,
+          response:
+            input.decision === "allow"
+              ? { behavior: "allow" }
+              : { behavior: "deny", ...(input.message ? { message: input.message } : {}) },
+        });
+        return {
+          host: hostLabel(host),
+          agentId: agent.id,
+          requestId: input.requestId,
+          decision: input.decision,
+        };
+      },
+    }),
+
+    tool({
       name: "mesh_archive_agent",
       title: "Archive an agent on a host",
       description:
@@ -571,17 +623,34 @@ export function isAbsolutePath(value: string): boolean {
 
 /** True when `child` is `parent` or below it. Works for POSIX and Windows paths on any host. */
 export function isWithin(child: string, parent: string): boolean {
-  const normalize = (value: string) => {
-    const windows = /^[a-zA-Z]:[\\/]/.test(value) || value.includes("\\");
-    let out = value.replace(/\\/g, "/").replace(/\/+/g, "/");
-    if (out.length > 1 && out.endsWith("/")) out = out.slice(0, -1);
-    return windows ? out.toLowerCase() : out;
-  };
-  const c = normalize(child);
-  const p = normalize(parent);
+  const c = normalizeRemotePath(child);
+  const p = normalizeRemotePath(parent);
   if (c === p) return true;
   const prefix = p.endsWith("/") ? p : `${p}/`;
   return c.startsWith(prefix);
+}
+
+/**
+ * Normalizes a path on another host without touching the local filesystem: resolves `.` and
+ * `..`, collapses separators and lowercases Windows paths. Symlinks cannot be resolved remotely,
+ * so allowedPaths is a guardrail for agents, not a sandbox.
+ */
+export function normalizeRemotePath(value: string): string {
+  const windows = /^[a-zA-Z]:[\\/]/.test(value) || value.includes("\\");
+  const unified = value.replace(/\\/g, "/");
+  const root = /^[a-zA-Z]:\//.test(unified)
+    ? unified.slice(0, 3)
+    : unified.startsWith("/")
+      ? "/"
+      : "";
+  const parts: string[] = [];
+  for (const part of unified.slice(root.length).split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  const out = `${root}${parts.join("/")}` || root;
+  return windows ? out.toLowerCase() : out;
 }
 
 export function summarizeAgent(host: HostRef, agent: PaseoAgent) {
