@@ -39,13 +39,13 @@ Paseo 自带的编排能力（`create_agent`、`send_agent_prompt`、完成通�
 插件不在沙箱里运行，拥有 daemon 用户的全部权限。只安装你信任的代码。
 
 1. 在编排 host 上开启插件：App 里打开 **Settings → Plugins → Enable plugins**，或在 `~/.paseo/config.json` 里设置 `"pluginsEnabled": true` 后运行 `paseo reload`。
-2. 从 GitHub 安装：
+2. 从 [Paseo 插件目录](https://paseo.sh/plugins/jtsang4/mesh) 安装（会安装经过审核的版本）：
 
    ```bash
-   paseo plugin add git:jtsang4/paseo-mesh
+   paseo plugin add jtsang4/mesh
    ```
 
-   或从 npm 安装：
+   也可以直接从 GitHub（`paseo plugin add git:jtsang4/paseo-mesh`）或 npm 安装：
 
    ```bash
    paseo plugin install npm:paseo-mesh

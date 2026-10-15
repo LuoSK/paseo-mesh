@@ -39,13 +39,13 @@ Only the orchestrating host needs the plugin. Peers are ordinary Paseo daemons y
 Plugins run unsandboxed with the daemon user's access. Install only code you trust.
 
 1. Enable plugins on the orchestrating host: **Settings → Plugins → Enable plugins** in the app, or set `"pluginsEnabled": true` in `~/.paseo/config.json` and run `paseo reload`.
-2. Install from GitHub:
+2. Install from the [Paseo plugin directory](https://paseo.sh/plugins/jtsang4/mesh), which installs the reviewed revision:
 
    ```bash
-   paseo plugin add git:jtsang4/paseo-mesh
+   paseo plugin add jtsang4/mesh
    ```
 
-   or from npm:
+   or straight from GitHub (`paseo plugin add git:jtsang4/paseo-mesh`) or from npm:
 
    ```bash
    paseo plugin install npm:paseo-mesh

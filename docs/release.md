@@ -32,7 +32,7 @@ npm reviews new versions before they go live. The publish request returns `202 A
 
 ## Paseo registry
 
-To list the plugin on [paseo.sh/plugins](https://paseo.sh/plugins), follow the submission guide in [getpaseo/plugins](https://github.com/getpaseo/plugins) with the released commit. `OVERVIEW.md` is the listing text; update it in the same release when behavior users see changes.
+The plugin is listed as [`jtsang4/mesh`](https://paseo.sh/plugins/jtsang4/mesh). The registry pins a commit, so a release reaches `paseo plugin add jtsang4/mesh` users only after a version bump in [getpaseo/plugins](https://github.com/getpaseo/plugins) points the record at the release commit. Follow its submission guide after each release. `OVERVIEW.md` and the manifest `media` at that commit are the listing; update them in the same release when behavior users see changes.
 
 ## Compatibility
 
