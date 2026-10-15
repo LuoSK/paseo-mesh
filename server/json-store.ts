@@ -39,6 +39,15 @@ export class JsonFileStore<T> {
     return parsed.data;
   }
 
+  /** True when the raw file exists and `predicate` holds for its parsed JSON. */
+  async rawMatches(predicate: (raw: unknown) => boolean): Promise<boolean> {
+    try {
+      return predicate(JSON.parse(await readFile(this.filePath, "utf8")));
+    } catch {
+      return false;
+    }
+  }
+
   /** Serialized read-modify-write so concurrent RPCs cannot lose each other's changes. */
   update(mutate: (current: T) => T | Promise<T>): Promise<T> {
     const next = this.queue.then(async () => {

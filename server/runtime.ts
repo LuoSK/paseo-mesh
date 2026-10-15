@@ -9,6 +9,7 @@ import {
   LOCAL_HOST_NAME,
   type MeshConfig,
   meshConfigSchema,
+  newPeerId,
   type PeerConfig,
   type PeerSummary,
 } from "../shared/config";
@@ -312,7 +313,7 @@ export class MeshRuntime {
     allowedPaths: string[];
   }): Promise<PeerSummary> {
     parseConnectionTarget(input.connection);
-    const id = `peer_${randomBytes(8).toString("hex")}`;
+    const id = newPeerId();
     await this.mutateConfig((config) => {
       if (config.peers.some((peer) => peer.name === input.name)) {
         throw new Error(`A peer named "${input.name}" already exists`);
@@ -392,7 +393,12 @@ export class MeshRuntime {
 
   private async reloadConfig(): Promise<void> {
     try {
-      this.applyConfig(await this.configStore.read());
+      let config = await this.configStore.read();
+      if (await this.configStore.rawMatches((raw) => peersMissingIds(raw))) {
+        // Persist IDs for hand-written peers so they stay stable across reloads.
+        config = await this.configStore.update((current) => current);
+      }
+      this.applyConfig(config);
       this.configError = null;
     } catch (error) {
       // Keep running with the last good config; surface the problem in status.
@@ -451,6 +457,15 @@ export const MCP_INSTRUCTIONS = `paseo-mesh connects this agent to other Paseo h
 Use mesh_list_hosts first. Identify agents by (host, agentId); "${LOCAL_HOST_NAME}" is this machine.
 Paths, providers and models always refer to the host you name. Files are not shared between hosts: hand work over through git or messages.
 When you create or prompt an agent with notifyOnFinish (default), you receive a message when it finishes, errors or needs permission. Do not poll.`;
+
+function peersMissingIds(raw: unknown): boolean {
+  if (typeof raw !== "object" || raw === null) return false;
+  const peers = (raw as { peers?: unknown }).peers;
+  return (
+    Array.isArray(peers) &&
+    peers.some((peer) => typeof peer === "object" && peer !== null && !("id" in peer))
+  );
+}
 
 function readLocalServerId(paseoHome: string | null): string | null {
   if (!paseoHome) return null;

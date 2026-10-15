@@ -3,6 +3,12 @@ import { z } from "zod";
 export const PEER_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 export const LOCAL_HOST_NAME = "local";
 
+export function newPeerId(): string {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  return `peer_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export const accessLevelSchema = z.enum(["read", "write"]);
 export type AccessLevel = z.infer<typeof accessLevelSchema>;
 
@@ -15,7 +21,11 @@ export const peerNameSchema = z
 /** A peer as stored on disk. `password` never leaves the daemon host. */
 export const peerConfigSchema = z.object({
   /** Stable identity. Names are labels and may change; watches and caches key on this ID. */
-  id: z.string().regex(/^peer_[a-z0-9]{8,32}$/),
+  /** Hand-written entries may omit it; the plugin assigns one and writes it back. */
+  id: z
+    .string()
+    .regex(/^peer_[a-z0-9]{8,32}$/)
+    .default(() => newPeerId()),
   name: peerNameSchema,
   /** Pairing offer URL, or a direct `host:port` / `ws://` / `wss://` endpoint. */
   connection: z.string().trim().min(1),
