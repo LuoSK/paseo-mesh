@@ -1,6 +1,6 @@
 {
   "name": "paseo-mesh",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Paseo plugin for cross-host agent orchestration: list, read, create and message agents on other Paseo daemons.",
   "license": "MIT",
   "author": "jtsang4",
@@ -23,6 +23,7 @@
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
+    "npm-shrinkwrap.json",
     "index.client.tsx",
     "index.server.ts",
     "docs/images/",

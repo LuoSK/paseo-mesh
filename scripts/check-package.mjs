@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Packs the plugin and checks what an npm install would receive.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -30,13 +30,30 @@ try {
     ...forbidden.map((file) => `unexpected ${file}`),
     ...("build" in manifest ? ["published manifest still declares the Git-only build step"] : []),
   ];
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const shrinkwrap = JSON.parse(
+    readFileSync(path.join(dir, "package", "npm-shrinkwrap.json"), "utf8"),
+  );
+  const locked = Object.entries(shrinkwrap.packages).filter(([location]) => location);
+  for (const name of Object.keys(pkg.dependencies)) {
+    if (!shrinkwrap.packages[`node_modules/${name}`]) problems.push(`shrinkwrap misses ${name}`);
+  }
+  for (const [location, entry] of locked) {
+    if (!entry.resolved || !entry.integrity) problems.push(`${location} is not pinned`);
+    if (entry.dev) problems.push(`${location} is a dev dependency`);
+  }
+  if (existsSync(new URL("../npm-shrinkwrap.json", import.meta.url))) {
+    problems.push("npm-shrinkwrap.json was left in the working tree after packing");
+  }
   const source = JSON.parse(readFileSync(new URL("../paseo-plugin.json", import.meta.url), "utf8"));
   if (!("build" in source)) problems.push("paseo-plugin.json lost its build step after packing");
   if (problems.length) {
     console.error(problems.join("\n"));
     process.exit(1);
   }
-  console.log(`${filename}: ${paths.length} files, manifest ok`);
+  console.log(
+    `${filename}: ${paths.length} files, manifest ok, ${locked.length} locked dependencies`,
+  );
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

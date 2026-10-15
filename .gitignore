@@ -6,3 +6,4 @@ coverage/
 .DS_Store
 *.tgz
 paseo-plugin.json.orig
+npm-shrinkwrap.json

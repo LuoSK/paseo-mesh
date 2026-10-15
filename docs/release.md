@@ -32,7 +32,9 @@ npm reviews new versions before they go live. The publish request returns `202 A
 
 ## Paseo registry
 
-The plugin is listed as [`jtsang4/mesh`](https://paseo.sh/plugins/jtsang4/mesh). The registry pins a commit, so a release reaches `paseo plugin add jtsang4/mesh` users only after a version bump in [getpaseo/plugins](https://github.com/getpaseo/plugins) points the record at the release commit. Follow its submission guide after each release. `OVERVIEW.md` and the manifest `media` at that commit are the listing; update them in the same release when behavior users see changes.
+The plugin is listed as [`jtsang4/mesh`](https://paseo.sh/plugins/jtsang4/mesh) with the npm package as its artifact. After a release reaches npm, the registry's bump workflow opens a PR that pins the new version; it reaches `paseo plugin add jtsang4/mesh` users once a maintainer merges it. `OVERVIEW.md` and the manifest `media` in the package are the listing; update them in the same release when behavior users see changes.
+
+The registry rejects npm artifacts without a locked dependency tree. `prepack` writes `npm-shrinkwrap.json` with the runtime closure of `package-lock.json` (`scripts/shrinkwrap.mjs`), and `npm run check:package` fails if the tarball lacks it or any entry is unpinned. Do not commit the shrinkwrap: npm would prefer it over `package-lock.json` for Git installs and development.
 
 ## Compatibility
 
