@@ -436,6 +436,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
         requireWrite(host);
         const api = await registry.api(host, CONNECT_TIMEOUT_MS);
         const agent = await requireAgent(api, host, input.agentId);
+        requireAllowedPath(host, agent.cwd);
         await api.agents.ref(agent.id).send(input.prompt, {
           activeTurnBehavior: input.activeTurnBehavior,
         });
@@ -495,6 +496,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
         requireWrite(host);
         const ops = await registry.ops(host, CONNECT_TIMEOUT_MS);
         const agent = await requireAgent(ops.api, host, input.agentId);
+        requireAllowedPath(host, agent.cwd);
         if (agent.status !== "running") {
           return { host: hostLabel(host), agentId: agent.id, stopped: false, status: agent.status };
         }
@@ -514,6 +516,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
         const { host, api } = await hostApi(input.host);
         requireWrite(host);
         const agent = await requireAgent(api, host, input.agentId);
+        requireAllowedPath(host, agent.cwd);
         if (!agent.pendingPermissions.some((request) => request.id === input.requestId)) {
           const pending =
             agent.pendingPermissions.map((request) => request.id).join(", ") || "none";
@@ -549,6 +552,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
         const { host, api } = await hostApi(input.host);
         requireWrite(host);
         const agent = await requireAgent(api, host, input.agentId);
+        requireAllowedPath(host, agent.cwd);
         const { archivedAt } = await api.agents.ref(agent.id).archive();
         return { host: hostLabel(host), agentId: agent.id, archivedAt };
       },

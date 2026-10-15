@@ -26,6 +26,8 @@ export const watchSchema = z.object({
   notifyAgentId: z.string(),
   createdAt: z.string(),
   notifiedPermissionIds: z.array(z.string()).default([]),
+  /** When the host stopped resolving. Persisted so restarts do not reset the orphan limit. */
+  orphanedAt: z.string().nullable().default(null),
 });
 export type Watch = z.infer<typeof watchSchema>;
 
@@ -94,6 +96,7 @@ export class WatchManager {
       notifyAgentId: input.notifyAgentId,
       createdAt: new Date().toISOString(),
       notifiedPermissionIds: [],
+      orphanedAt: null,
     };
     const replaced: string[] = [];
     const maxWatches = this.options.maxWatches ?? 500;
@@ -133,7 +136,12 @@ export class WatchManager {
     const runners = [...this.runners.values()];
     for (const runner of runners) runner.abort.abort();
     this.poke();
-    await Promise.allSettled(runners.map((runner) => runner.done));
+    // Runners stop at their next await; a delivery already in flight is not waited for long,
+    // because Paseo kills a plugin that takes more than a few seconds to stop.
+    await Promise.race([
+      Promise.allSettled(runners.map((runner) => runner.done)),
+      new Promise((resolve) => setTimeout(resolve, 1_000)),
+    ]);
     this.runners.clear();
   }
 
@@ -165,41 +173,45 @@ export class WatchManager {
     const retryDelayMs = this.options.retryDelayMs ?? 3_000;
     const orphanTtlMs = this.options.orphanTtlMs ?? 24 * 60 * 60 * 1000;
     const waitChunkMs = this.options.waitChunkMs ?? 5 * 60 * 1000;
-    let orphanSince: number | null = null;
+    let permissionDelayMs = retryDelayMs;
 
     while (!signal.aborted) {
       const host = this.resolveHost(watch);
       if (!host) {
-        orphanSince ??= Date.now();
-        if (Date.now() - orphanSince > orphanTtlMs) {
-          await this.finish(watch, {
+        if (!watch.orphanedAt) {
+          watch = await this.save({ ...watch, orphanedAt: new Date().toISOString() });
+        }
+        const orphanedFor = Date.now() - Date.parse(watch.orphanedAt ?? "");
+        if (orphanedFor > orphanTtlMs) {
+          await this.finish(watch, signal, {
             text: `[paseo-mesh] Stopped watching agent ${watch.agentId} on host ${watch.hostName}: the host was removed from mesh and did not come back.`,
           });
           return;
         }
-        await this.sleep(Math.min(orphanTtlMs, 30_000), signal);
+        await this.sleep(Math.min(orphanTtlMs - orphanedFor + 10, 30_000), signal);
         continue;
       }
-      orphanSince = null;
+      if (watch.orphanedAt) watch = await this.save({ ...watch, orphanedAt: null });
 
       let ops: HostOps;
       try {
         ops = await this.options.registry.ops(host, retryDelayMs);
       } catch (error) {
-        if (!(error instanceof PeerUnavailableError)) throw error;
+        // Offline peers and an unreachable local daemon are both worth waiting out.
+        if (!(error instanceof PeerUnavailableError)) {
+          this.options.logger.warn(`Watch ${watch.id}: ${messageOf(error)}`);
+        }
         await this.sleep(retryDelayMs, signal);
         continue;
       }
 
-      let result: WaitForFinishResult;
+      let result: WaitForFinishResult | null;
       try {
-        result = await ops.waitForFinish(watch.agentId, waitChunkMs);
+        result = await abortable(ops.waitForFinish(watch.agentId, waitChunkMs), signal);
       } catch (error) {
         if (signal.aborted) return;
         if (await this.agentIsGone(ops, watch.agentId)) {
-          await this.finish(watch, {
-            text: `[paseo-mesh] Stopped watching agent ${watch.agentId} on host ${hostLabel(host)}: the agent no longer exists there.`,
-          });
+          await this.finish(watch, signal, { text: goneMessage(watch, hostLabel(host)) });
           return;
         }
         this.options.logger.warn(
@@ -208,7 +220,7 @@ export class WatchManager {
         await this.sleep(retryDelayMs, signal);
         continue;
       }
-      if (signal.aborted) return;
+      if (!result || signal.aborted) return;
 
       if (result.status === "timeout") continue;
       if (result.status === "permission") {
@@ -217,19 +229,45 @@ export class WatchManager {
           (request) => !watch.notifiedPermissionIds.includes(request.id),
         );
         if (fresh.length > 0) {
-          watch = await this.recordPermissions(
+          const outcome = await this.deliverWithRetry(
             watch,
-            pending.map((request) => request.id),
+            this.format(watch, host, "needs permission", result, fresh),
+            signal,
           );
-          await this.notify(watch, host, "needs permission", result, fresh);
+          if (outcome === "aborted") return;
+          if (outcome === "caller-gone") {
+            await this.remove(watch);
+            return;
+          }
+          // Recorded only after delivery, so a failed delivery is retried on the next pass.
+          watch = await this.save({
+            ...watch,
+            notifiedPermissionIds: pending.map((request) => request.id),
+          });
+          permissionDelayMs = retryDelayMs;
+        } else {
+          permissionDelayMs = Math.min(permissionDelayMs * 2, 30_000);
         }
-        await this.sleep(retryDelayMs, signal);
+        await this.sleep(permissionDelayMs, signal);
         continue;
       }
-      await this.finish(watch, {
-        host,
-        reason: result.status === "error" ? "errored" : "finished",
-        result,
+      // The daemon answers a wait for a deleted agent with an error and no snapshot.
+      if (
+        result.status === "error" &&
+        !result.final &&
+        (await this.agentIsGone(ops, watch.agentId))
+      ) {
+        await this.finish(watch, signal, { text: goneMessage(watch, hostLabel(host)) });
+        return;
+      }
+      await this.finish(watch, signal, {
+        text: this.format(
+          watch,
+          host,
+          result.status === "error" ? "errored" : "finished",
+          result,
+          [],
+        ),
       });
       return;
     }
@@ -260,70 +298,86 @@ export class WatchManager {
     }
   }
 
-  private async recordPermissions(watch: Watch, ids: string[]): Promise<Watch> {
-    const next = { ...watch, notifiedPermissionIds: ids };
+  private async save(next: Watch): Promise<Watch> {
     await this.options.store.update((file) => ({
       ...file,
-      watches: file.watches.map((existing) => (existing.id === watch.id ? next : existing)),
+      watches: file.watches.map((existing) => (existing.id === next.id ? next : existing)),
     }));
     return next;
   }
 
-  private async finish(
-    watch: Watch,
-    outcome:
-      | { text: string }
-      | { host: HostRef; reason: FinishReason; result: WaitForFinishResult },
-  ): Promise<void> {
-    if ("text" in outcome) await this.deliver(watch, outcome.text);
-    else await this.notify(watch, outcome.host, outcome.reason, outcome.result, []);
+  private async remove(watch: Watch): Promise<void> {
     await this.options.store.update((file) => ({
       ...file,
       watches: file.watches.filter((existing) => existing.id !== watch.id),
     }));
   }
 
-  private async notify(
+  /** Delivers the final message, then deletes the watch. On abort the watch stays on disk. */
+  private async finish(
+    watch: Watch,
+    signal: AbortSignal,
+    outcome: { text: string },
+  ): Promise<void> {
+    const delivered = await this.deliverWithRetry(watch, outcome.text, signal);
+    if (delivered === "aborted") return;
+    await this.remove(watch);
+  }
+
+  private format(
     watch: Watch,
     host: HostRef,
     reason: FinishReason,
     result: WaitForFinishResult,
     permissions: readonly unknown[],
-  ): Promise<void> {
-    await this.deliver(
-      watch,
-      formatNotification({
-        hostName: hostLabel(host),
-        serverId: hostServerId(host) ?? watch.serverId,
-        agentId: watch.agentId,
-        title: result.final?.title ?? null,
-        reason,
-        error: result.error,
-        lastMessage: result.lastMessage,
-        permissions,
-      }),
-    );
+  ): string {
+    return formatNotification({
+      hostName: hostLabel(host),
+      serverId: hostServerId(host) ?? watch.serverId,
+      agentId: watch.agentId,
+      title: result.final?.title ?? null,
+      reason,
+      error: result.error,
+      lastMessage: result.lastMessage,
+      permissions,
+    });
   }
 
-  private async deliver(watch: Watch, text: string): Promise<void> {
-    let parent: ReturnType<PaseoApi["agents"]["ref"]>;
-    let snapshot: Awaited<ReturnType<typeof parent.refresh>>;
-    try {
-      parent = (await this.options.localApi()).agents.ref(watch.notifyAgentId);
-      snapshot = await parent.refresh();
-    } catch (error) {
-      this.options.logger.warn(`Cannot reach caller ${watch.notifyAgentId}: ${messageOf(error)}`);
-      return;
+  /** Retries transient delivery failures with backoff until delivered or aborted. */
+  private async deliverWithRetry(
+    watch: Watch,
+    text: string,
+    signal: AbortSignal,
+  ): Promise<"delivered" | "caller-gone" | "aborted"> {
+    let delayMs = this.options.retryDelayMs ?? 3_000;
+    while (!signal.aborted) {
+      try {
+        return await this.deliver(watch, text);
+      } catch (error) {
+        this.options.logger.warn(
+          `Notifying ${watch.notifyAgentId} failed, retrying: ${messageOf(error)}`,
+        );
+        await this.sleep(delayMs, signal);
+        delayMs = Math.min(delayMs * 2, 60_000);
+      }
     }
+    return "aborted";
+  }
+
+  /** Throws on transient failures; resolves "caller-gone" when the caller cannot be notified. */
+  private async deliver(watch: Watch, text: string): Promise<"delivered" | "caller-gone"> {
+    const parent = (await this.options.localApi()).agents.ref(watch.notifyAgentId);
+    const snapshot = await parent.refresh();
     if (!snapshot) {
       this.options.logger.info(`Caller ${watch.notifyAgentId} is gone; dropping notification`);
-      return;
+      return "caller-gone";
     }
     if (snapshot.agent.archivedAt) {
       this.options.logger.info(`Caller ${watch.notifyAgentId} is archived; dropping notification`);
-      return;
+      return "caller-gone";
     }
     await parent.send(text, { activeTurnBehavior: "steer" });
+    return "delivered";
   }
 
   private sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -340,6 +394,35 @@ export class WatchManager {
       this.wakers.add(done);
     });
   }
+}
+
+function goneMessage(watch: Watch, hostName: string): string {
+  return `[paseo-mesh] Stopped watching agent ${watch.agentId} on host ${hostName}: the agent no longer exists there.`;
+}
+
+/** Resolves with the promise's value, or null as soon as the signal aborts. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T | null> {
+  if (signal.aborted) {
+    promise.catch(() => {});
+    return Promise.resolve(null);
+  }
+  return new Promise<T | null>((resolve, reject) => {
+    const onAbort = () => {
+      promise.catch(() => {});
+      resolve(null);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 export function formatNotification(input: {

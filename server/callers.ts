@@ -18,6 +18,8 @@ export const callerFileSchema = z.object({
 export type CallerFile = z.infer<typeof callerFileSchema>;
 
 const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
+/** Oldest entries beyond this are dropped; their agents keep the tools but lose notifications. */
+const MAX_CALLERS = 5_000;
 
 /**
  * Maps MCP caller nonces to local agent IDs.
@@ -39,10 +41,11 @@ export class CallerRegistry {
 
   async issue(): Promise<string> {
     const nonce = `c${randomBytes(12).toString("hex")}`;
-    this.cache = await this.store.update((file) => ({
-      ...file,
-      callers: { ...file.callers, [nonce]: { agentId: null, createdAt: new Date().toISOString() } },
-    }));
+    this.cache = await this.store.update((file) => {
+      const callers = pruned(file.callers, Date.now());
+      callers[nonce] = { agentId: null, createdAt: new Date().toISOString() };
+      return { ...file, callers };
+    });
     return nonce;
   }
 
@@ -64,15 +67,24 @@ export class CallerRegistry {
   }
 
   private async prune(): Promise<void> {
-    const cutoff = Date.now() - PENDING_TTL_MS;
-    const stale = Object.entries(this.cache.callers).filter(
-      ([, entry]) => entry.agentId === null && Date.parse(entry.createdAt) < cutoff,
-    );
-    if (stale.length === 0) return;
-    this.cache = await this.store.update((file) => {
-      const callers = { ...file.callers };
-      for (const [nonce] of stale) delete callers[nonce];
-      return { ...file, callers };
-    });
+    const next = pruned(this.cache.callers, Date.now());
+    if (Object.keys(next).length === Object.keys(this.cache.callers).length) return;
+    this.cache = await this.store.update((file) => ({
+      ...file,
+      callers: pruned(file.callers, Date.now()),
+    }));
   }
+}
+
+/** Drops unbound nonces older than a day, then the oldest entries beyond MAX_CALLERS. */
+export function pruned(
+  callers: CallerFile["callers"],
+  now: number,
+  max = MAX_CALLERS,
+): CallerFile["callers"] {
+  const fresh = Object.entries(callers).filter(
+    ([, entry]) => entry.agentId !== null || now - Date.parse(entry.createdAt) < PENDING_TTL_MS,
+  );
+  fresh.sort(([, a], [, b]) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  return Object.fromEntries(fresh.slice(Math.max(0, fresh.length - (max - 1))));
 }

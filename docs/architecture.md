@@ -47,7 +47,9 @@ Injection is skipped for providers in `excludeProviders` (Pi rejects agents with
 
 Finish notifications need the local agent that called a tool. MCP requests carry no agent identity, and `agent.create` runs before the daemon assigns an agent ID. Mesh issues a random nonce in `agent.create`, puts it in both the MCP URL (`?caller=<nonce>`) and the create `env` (`PASEO_MESH_CALLER`), and binds it to the agent ID when `agent.session_open` sees that env. The binding is persisted because the nonce lives on in the stored MCP URL while the env does not. A nonce binds once; unbound nonces are pruned after a day.
 
-Tool calls without a bound caller still work; they just cannot arm notifications.
+A config copied from another agent (a schedule, for example) carries that agent's mesh URL and nonce. The create hook recognizes its own endpoint and issues a fresh nonce, so the new agent never acts as the original. A `mesh` server that is not this plugin's is left alone.
+
+Tool calls without a bound caller still work; they just cannot arm notifications. `callers.json` drops unbound nonces after a day and keeps at most 5,000 entries.
 
 ## Peer connections
 
@@ -59,7 +61,7 @@ The client's own reconnect is disabled. On any disconnect the connection is torn
 - A peer reaching this daemon's own `serverId` is a self loop.
 - A peer reaching a daemon already online under another peer is a duplicate.
 
-A generation counter discards results of connects that were superseded by a config change or close.
+A generation counter discards results of connects that were superseded by a config change or close, and a closed peer never restarts. Duplicate detection compares against peers that are online or have just claimed a server ID: validation and the claim happen without an `await` in between, so of two peers reaching the same daemon at the same moment, exactly one wins.
 
 Config is applied as a diff keyed by the stable peer `id`. Name, access and allowed-path changes are applied in place. Connection, password and enablement changes reconnect.
 
@@ -71,12 +73,14 @@ Paseo hands plugin code a `PaseoApi` only inside hook and RPC calls. Tool calls 
 
 A watch is `(hostId, serverId, agentId, notifyAgentId)`. Its runner loops:
 
-1. Resolve the host by peer id, then by `serverId`. If neither resolves, wait (up to 24 hours) for the daemon to come back under any peer, then give up and tell the caller.
-2. Get the host's operations. While offline, sleep and retry; peer connections wake waiting runners.
-3. Call the daemon's `waitForFinish` in 5-minute chunks. It returns immediately when the agent is idle, so a turn that ended during a disconnect is reported after reconnecting.
-4. On `permission`, notify once per request ID (persisted) and keep waiting. On `idle` or `error`, notify and delete the watch. If the wait fails and the agent no longer exists, tell the caller and delete the watch.
+1. Resolve the host by peer id, then by `serverId`. If neither resolves, record `orphanedAt` on the watch and wait for the daemon to come back under any peer. After 24 hours, counted from the persisted time so restarts do not reset it, tell the caller and give up.
+2. Get the host's operations. Any failure here (peer offline, local daemon unreachable) is waited out; peer connections wake waiting runners.
+3. Call the daemon's `waitForFinish` in 5-minute chunks, raced against the runner's abort signal so plugin shutdown never waits on it. The daemon returns immediately when the agent is idle, so a turn that ended during a disconnect is reported after reconnecting.
+4. On `permission`, notify once per request ID and keep polling with backoff (3 to 30 seconds) while it stays pending. On `idle` or `error`, notify and delete the watch. The daemon answers a wait for a deleted agent with an error and no snapshot; mesh confirms the agent is gone and tells the caller so instead of reporting an error.
 
-Notifications are sent to the caller with `activeTurnBehavior: "steer"`, like Paseo's own. Archived or deleted callers are skipped. Re-arming the same agent for the same caller replaces the earlier watch.
+Delivery is at least once. A failed delivery is retried with backoff and the watch is only deleted after the caller was notified or is gone (deleted or archived). Permission IDs are recorded only after their notification was delivered. A plugin stop during delivery keeps the watch on disk, so it can be delivered again after the restart.
+
+Notifications are sent to the caller with `activeTurnBehavior: "steer"`, like Paseo's own. Re-arming the same agent for the same caller replaces the earlier watch.
 
 ## Testing
 

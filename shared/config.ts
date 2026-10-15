@@ -52,6 +52,14 @@ export const injectionConfigSchema = z.object({
 });
 export type InjectionConfig = z.infer<typeof injectionConfigSchema>;
 
+/** Partial update. Built without defaults: Zod's partial() of a schema with defaults fills them in. */
+export const injectionPatchSchema = z.object({
+  enabled: z.boolean().optional(),
+  excludeProviders: z.array(z.string()).optional(),
+  preapproveReadOnlyTools: z.boolean().optional(),
+  preapproveProviders: z.array(z.string()).optional(),
+});
+
 export const meshConfigSchema = z
   .object({
     version: z.literal(1).default(1),

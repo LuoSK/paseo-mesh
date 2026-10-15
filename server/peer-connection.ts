@@ -57,6 +57,9 @@ export class PeerConnection {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly waiters = new Set<() => void>();
   private lastIdentity: ServerIdentity | null = null;
+  /** Identity accepted for the in-flight connect, so concurrent peers see it as taken. */
+  private claimed: string | null = null;
+  private closed = false;
 
   constructor(
     private config: PeerConfig,
@@ -79,12 +82,18 @@ export class PeerConnection {
     return this.state.status;
   }
 
+  /** Server ID this peer is online with or currently finishing a connect to. */
+  get claimedServerId(): string | null {
+    return this.state.status === "online" ? this.state.identity.serverId : this.claimed;
+  }
+
   /** Last verified identity; survives disconnects so callers can still match by serverId. */
   get identity(): ServerIdentity | null {
     return this.state.status === "online" ? this.state.identity : this.lastIdentity;
   }
 
   start(): void {
+    if (this.closed) return;
     if (!this.config.enabled) {
       this.setState({ status: "disabled" });
       return;
@@ -111,18 +120,26 @@ export class PeerConnection {
     this.config = next;
     if (!reconnect) return;
     if (connectionChanged) this.lastIdentity = null;
-    void this.teardown().then(() => this.start());
+    this.restart();
   }
 
   /** Reconnect now, skipping any pending backoff. */
   retryNow(): void {
     if (this.state.status === "online" || this.state.status === "connecting") return;
-    void this.teardown().then(() => this.start());
+    this.restart();
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     await this.teardown();
     this.setState({ status: "disabled" });
+  }
+
+  private restart(): void {
+    void this.teardown().then((generation) => {
+      // A later update, retry or close superseded this restart.
+      if (!this.closed && generation === this.generation) this.start();
+    });
   }
 
   /** Resolves the API once online, or throws after `timeoutMs` with the current reason. */
@@ -239,6 +256,9 @@ export class PeerConnection {
       this.setState({ status: "error", error: rejection });
       return;
     }
+    // Validation and claim happen without an await in between, so of two peers connecting to
+    // the same daemon at once, the second sees the first's claim.
+    this.claimed = identity.serverId;
 
     this.lastIdentity = identity;
     const api = createPaseoApi(client);
@@ -246,6 +266,7 @@ export class PeerConnection {
       // The daemon session expects an agent directory fetch before other requests.
       await api.agents.list({ page: { limit: 1 } });
     } catch (error) {
+      this.claimed = null;
       await api.dispose().catch(() => {});
       await client.close().catch(() => {});
       if (generation !== this.generation) return;
@@ -257,6 +278,7 @@ export class PeerConnection {
       await client.close().catch(() => {});
       return;
     }
+    this.claimed = null;
     client.subscribeConnectionStatus((status) => {
       if (generation !== this.generation) return;
       if (status.status === "disconnected" || status.status === "disposed") {
@@ -275,6 +297,7 @@ export class PeerConnection {
   }
 
   private scheduleRetry(attempt: number, error: string): void {
+    if (this.closed) return;
     const retry = this.options.retry ?? { baseDelayMs: 1_000, maxDelayMs: 30_000 };
     const exponential = Math.min(retry.maxDelayMs, retry.baseDelayMs * 2 ** (attempt - 1));
     const delay = Math.round(exponential * (0.8 + Math.random() * 0.4));
@@ -287,16 +310,19 @@ export class PeerConnection {
     }, delay);
   }
 
-  private async teardown(): Promise<void> {
-    this.generation++;
+  /** Stops the current connection; resolves with the generation it established. */
+  private async teardown(): Promise<number> {
+    const generation = ++this.generation;
+    this.claimed = null;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     const state = this.state;
+    this.setState({ status: "disabled" });
     if (state.status === "online") {
       await state.api.dispose().catch(() => {});
       await state.client.close().catch(() => {});
     }
-    this.setState({ status: "disabled" });
+    return generation;
   }
 
   private setState(state: ConnectionState): void {

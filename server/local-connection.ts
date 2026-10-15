@@ -19,6 +19,7 @@ export class LocalConnection {
   private provided: PaseoApi | null = null;
   private own: { client: DaemonClient; api: PaseoApi } | null = null;
   private connecting: Promise<PaseoApi> | null = null;
+  private closed = false;
 
   constructor(
     private readonly options: {
@@ -34,6 +35,7 @@ export class LocalConnection {
   }
 
   async api(): Promise<PaseoApi> {
+    if (this.closed) throw new Error("paseo-mesh is stopping");
     if (this.provided) return this.provided;
     if (this.own) return this.own.api;
     this.connecting ??= this.connect().finally(() => {
@@ -43,6 +45,7 @@ export class LocalConnection {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     const own = this.own;
     this.own = null;
     if (!own) return;
@@ -86,8 +89,19 @@ export class LocalConnection {
       throw new Error(`Cannot connect to the local daemon at ${listen}: ${messageOf(error)}`);
     }
     const api = createPaseoApi(client);
-    // The daemon session expects an agent directory fetch before other requests.
-    await api.agents.list({ page: { limit: 1 } });
+    try {
+      // The daemon session expects an agent directory fetch before other requests.
+      await api.agents.list({ page: { limit: 1 } });
+    } catch (error) {
+      await api.dispose().catch(() => {});
+      await client.close().catch(() => {});
+      throw new Error(`The local daemon at ${listen} did not answer: ${messageOf(error)}`);
+    }
+    if (this.closed) {
+      await api.dispose().catch(() => {});
+      await client.close().catch(() => {});
+      throw new Error("paseo-mesh is stopping");
+    }
     this.own = { client, api };
     this.options.logger.info(`Connected to the local daemon at ${listen}`);
     return api;

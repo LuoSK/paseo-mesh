@@ -22,7 +22,7 @@ Only the orchestrating host needs the plugin. Peers are ordinary Paseo daemons y
 - **Mesh tools for agents.** New agents on the host get a `mesh` MCP server with `mesh_list_hosts`, `mesh_list_workspaces`, `mesh_list_agents`, `mesh_get_agent`, `mesh_read_timeline`, `mesh_list_providers`, `mesh_create_agent`, `mesh_send_prompt`, `mesh_wait_agent`, `mesh_respond_permission`, `mesh_stop_agent` and `mesh_archive_agent`.
 - **Finish notifications across hosts.** When an agent starts or prompts a remote agent, it receives a message when that agent finishes, errors or asks for permission, in the same format as Paseo's own notifications.
 - **Any connection Paseo supports.** Pairing offer URLs and `relay://` URIs (end-to-end encrypted through the Paseo relay, no open ports), or direct `host:port` / `ws://` / `wss://` with an optional daemon password (Tailscale, LAN, reverse proxy).
-- **Per-host access control.** Each peer is read-only or read-write, optionally limited to allowed paths.
+- **Per-host access control.** Each peer is read-only or read-write, optionally limited to allowed paths: agents can only create, prompt, stop, archive or answer permissions for agents under those paths.
 - **App screens.** A Mesh screen with host status and agents across hosts, and a Peers settings screen to add, edit and remove peers.
 - **Headless management.** A `paseo-mesh` CLI for daemons without the app.
 

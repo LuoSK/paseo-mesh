@@ -167,7 +167,9 @@ export class MeshRuntime {
       const next = await this.mutateConfig((config) => ({
         ...config,
         ...(input.localAccess ? { localAccess: input.localAccess } : {}),
-        ...(input.injection ? { injection: { ...config.injection, ...input.injection } } : {}),
+        ...(input.injection
+          ? { injection: { ...config.injection, ...definedOnly(input.injection) } }
+          : {}),
       }));
       return { localAccess: next.localAccess, injection: next.injection };
     });
@@ -210,7 +212,13 @@ export class MeshRuntime {
       const injection = this.config.injection;
       if (!injection.enabled || !this.mcp || !this.token) return undefined;
       if (injection.excludeProviders.includes(request.config.provider)) return undefined;
-      if (request.config.mcpServers?.[MCP_SERVER_NAME]) return undefined;
+      const existing = request.config.mcpServers?.[MCP_SERVER_NAME];
+      // A config copied from another agent (schedules, forks) carries that agent's caller
+      // nonce; replace it so the new agent gets its own identity. Leave a foreign "mesh"
+      // server that is not ours alone.
+      if (existing && !(existing.type === "http" && isMeshUrl(existing.url, this.mcp.url))) {
+        return undefined;
+      }
       const nonce = await this.callers.issue();
       const preapproved =
         injection.preapproveReadOnlyTools &&
@@ -221,7 +229,9 @@ export class MeshRuntime {
               tool,
             }))
           : [];
-      const existingPolicy = request.config.toolPolicy?.preapproved ?? [];
+      const existingPolicy = (request.config.toolPolicy?.preapproved ?? []).filter(
+        (grant) => grant.server !== MCP_SERVER_NAME,
+      );
       return {
         ...request,
         config: {
@@ -459,6 +469,27 @@ export const MCP_INSTRUCTIONS = `paseo-mesh connects this agent to other Paseo h
 Use mesh_list_hosts first. Identify agents by (host, agentId); "${LOCAL_HOST_NAME}" is this machine.
 Paths, providers and models always refer to the host you name. Files are not shared between hosts: hand work over through git or messages.
 When you create or prompt an agent with notifyOnFinish (default), you receive a message when it finishes, errors or needs permission. Do not poll.`;
+
+/** True for this plugin's MCP endpoint, on its current or any earlier loopback port. */
+function isMeshUrl(url: string, current: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const ours = new URL(current);
+    return (
+      parsed.hostname === ours.hostname &&
+      parsed.pathname === ours.pathname &&
+      parsed.searchParams.has("caller")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function definedOnly<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as Partial<T>;
+}
 
 function peersMissingIds(raw: unknown): boolean {
   if (typeof raw !== "object" || raw === null) return false;

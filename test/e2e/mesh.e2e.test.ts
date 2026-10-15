@@ -317,6 +317,16 @@ describe("access control", () => {
     expect(created.agentId).toBeTruthy();
     // Anonymous callers cannot receive notifications.
     expect(created.notifyOnFinish).toBe(false);
+
+    // Agents outside the allowed paths cannot be controlled either.
+    await a.rpc("mesh.peers.update", { id: added.id, allowedPaths: [`${workB}/elsewhere`] });
+    expect(
+      await callToolError(client, "mesh_send_prompt", {
+        host: "b",
+        agentId: created.agentId,
+        prompt: "hi",
+      }),
+    ).toMatch(/outside the paths/);
   });
 
   it("rejects malformed tool arguments with a readable message", async () => {
@@ -700,6 +710,57 @@ describe("configuration file", () => {
       const value = await status();
       return value.configError === null && !value.hosts.some((entry) => entry.name === "hand-b");
     });
+  });
+
+  it("flags one of two peers that reach the same daemon at the same moment", async () => {
+    const file = path.join(a.meshDataDir(), "config.json");
+    const current = JSON.parse(await readFile(file, "utf8"));
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...current,
+        peers: [
+          { name: "twin-1", connection: b.endpoint },
+          { name: "twin-2", connection: `ws://${b.endpoint}/ws` },
+        ],
+      }),
+    );
+    const settled = await waitFor(async () => {
+      const hosts = (await status()).hosts.filter((entry) => entry.name.startsWith("twin-"));
+      const statuses = hosts.map((entry) => entry.status).sort();
+      return statuses.join(",") === "error,online" ? hosts : null;
+    });
+    expect(settled.find((entry) => entry.status === "error")?.error).toMatch(/Same daemon as/);
+  });
+
+  it("updates one injection setting without resetting the others", async () => {
+    await a.rpc("mesh.settings.update", { injection: { preapproveReadOnlyTools: false } });
+    try {
+      const after = await a.rpc<{
+        injection: { enabled: boolean; preapproveReadOnlyTools: boolean };
+      }>("mesh.settings.update", { injection: { enabled: true } });
+      expect(after.injection).toMatchObject({ enabled: true, preapproveReadOnlyTools: false });
+    } finally {
+      await a.rpc("mesh.settings.update", { injection: { preapproveReadOnlyTools: true } });
+    }
+  });
+
+  it("gives an agent created from a copied config its own caller identity", async () => {
+    const parent = await orchestrator("copy-source");
+    const copied = (await a.agentRecord(parent)).config.mcpServers ?? {};
+    const api = await a.api();
+    const workspace = await api.workspaces.open(workA);
+    const child = await workspace.agents.create({
+      config: { provider: ECHO_MODEL, mcpServers: copied as never },
+      title: "copy-target",
+      prompt: "ready",
+    });
+    await child.waitForFinish(30_000);
+    const parentUrl = new URL(copied.mesh?.url ?? "");
+    const childUrl = new URL((await a.agentRecord(child.id)).config.mcpServers?.mesh?.url ?? "");
+    expect(childUrl.searchParams.get("caller")).not.toBe(parentUrl.searchParams.get("caller"));
+    const callers = JSON.parse(await readFile(path.join(a.meshDataDir(), "callers.json"), "utf8"));
+    expect(callers.callers[childUrl.searchParams.get("caller") ?? ""].agentId).toBe(child.id);
   });
 
   it("can turn off injection and preapproval for new agents", async () => {

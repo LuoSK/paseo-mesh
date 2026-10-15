@@ -220,8 +220,8 @@ export class HostRegistry {
       return "This peer points back to this daemon; use the local host instead";
     }
     for (const other of this.peers.values()) {
-      if (other === candidate || other.status !== "online") continue;
-      if (other.identity?.serverId === identity.serverId) {
+      if (other === candidate) continue;
+      if (other.claimedServerId === identity.serverId) {
         return `Same daemon as peer "${other.name}" (${identity.serverId})`;
       }
     }

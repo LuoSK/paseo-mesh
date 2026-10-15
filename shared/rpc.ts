@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   accessLevelSchema,
   injectionConfigSchema,
+  injectionPatchSchema,
   peerNameSchema,
   peerSummarySchema,
 } from "./config";
@@ -67,7 +68,7 @@ export const updateSettingsRpc = defineRpc({
   name: "mesh.settings.update",
   input: z.object({
     localAccess: accessLevelSchema.optional(),
-    injection: injectionConfigSchema.partial().optional(),
+    injection: injectionPatchSchema.optional(),
   }),
   output: z.object({ localAccess: accessLevelSchema, injection: injectionConfigSchema }),
 });

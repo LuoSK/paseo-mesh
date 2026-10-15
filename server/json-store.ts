@@ -89,7 +89,9 @@ export class JsonFileStore<T> {
       });
       watcher.on("error", () => {});
     };
-    void start();
+    start().catch(() => {
+      // Without a watcher, external edits apply on the next plugin start instead.
+    });
     return () => {
       closed = true;
       if (timer) clearTimeout(timer);
