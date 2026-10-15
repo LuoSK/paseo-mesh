@@ -24,7 +24,7 @@ function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith("PASEO_")) env[key] = value;
   }
-  return { ...env, CI: "true", PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: "0", ...extra };
+  return { ...env, CI: "true", ...extra };
 }
 
 export async function freePort(): Promise<number> {
@@ -71,6 +71,7 @@ export class TestDaemon {
           relay: { enabled: options.relay ?? false },
           ...(options.password ? { auth: { password: hashDaemonPassword(options.password) } } : {}),
         },
+        features: { dictation: { enabled: false }, voiceMode: { enabled: false } },
         pluginsEnabled: true,
       }),
     );

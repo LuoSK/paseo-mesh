@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { PaseoApi } from "@getpaseo/client";
 import { z } from "zod";
+import { messageOf } from "../errors";
 import {
   type HostOps,
   type HostRef,
@@ -8,10 +9,10 @@ import {
   hostLabel,
   hostServerId,
   type WaitForFinishResult,
-} from "./host-registry";
-import type { JsonFileStore } from "./json-store";
-import type { Logger } from "./logger";
-import { messageOf, PeerUnavailableError } from "./peer-connection";
+} from "../hosts/host-registry";
+import { PeerUnavailableError } from "../hosts/peer";
+import type { Logger } from "../logger";
+import type { StateStore } from "../state/json-store";
 
 export const watchSchema = z.object({
   id: z.string(),
@@ -40,8 +41,8 @@ export type WatchFile = z.infer<typeof watchFileSchema>;
 export type FinishReason = "finished" | "errored" | "needs permission";
 
 export interface WatchManagerOptions {
-  store: JsonFileStore<WatchFile>;
-  registry: HostRegistry;
+  store: StateStore<WatchFile>;
+  registry: Pick<HostRegistry, "ops" | "localHost" | "peerById" | "peerByServerId">;
   localApi(): Promise<PaseoApi>;
   logger: Logger;
   /** How long one server-side wait lasts before re-arming. */

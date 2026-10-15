@@ -1,6 +1,15 @@
 import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
 import { z } from "zod";
-import { LOCAL_HOST_NAME } from "../shared/config";
+import { LOCAL_HOST_NAME } from "../../shared/config";
+import { isAbsolutePath, isWithin } from "../agents/paths";
+import {
+  listAgents,
+  MESH_LABEL_CALLER_AGENT,
+  MESH_LABEL_CALLER_HOST,
+  MESH_LABEL_CALLER_SERVER,
+  summarizeAgent,
+} from "../agents/queries";
+import type { WatchManager } from "../agents/watches";
 import {
   ADD_HOST_GUIDANCE,
   type HostRef,
@@ -9,20 +18,18 @@ import {
   hostAllowedPaths,
   hostLabel,
   hostServerId,
-} from "./host-registry";
-import type { McpCaller, McpTool, McpToolResult } from "./mcp-http";
-import type { WatchManager } from "./watches";
-
-export const MESH_LABEL_CALLER_SERVER = "paseo-mesh.caller-server-id";
-export const MESH_LABEL_CALLER_AGENT = "paseo-mesh.caller-agent-id";
-export const MESH_LABEL_CALLER_HOST = "paseo-mesh.caller-hostname";
+} from "../hosts/host-registry";
+import type { McpCaller, McpTool, McpToolResult } from "./http";
 
 const CONNECT_TIMEOUT_MS = 10_000;
 const MAX_TEXT_CHARS = 2_000;
 
 export interface ToolContext {
-  registry: HostRegistry;
-  watches: WatchManager;
+  registry: Pick<
+    HostRegistry,
+    "resolve" | "localHost" | "remotePeers" | "api" | "ops" | "summaries"
+  >;
+  watches: Pick<WatchManager, "add">;
   /** Resolves the calling agent from the MCP URL's caller nonce. */
   resolveCaller(caller: McpCaller): string | null;
   localServerId(): string | null;
@@ -254,41 +261,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
       schema: schemas.listAgents,
       readOnly: true,
       async run(input) {
-        const hosts: HostRef[] = input.host
-          ? [registry.resolve(input.host)]
-          : [
-              registry.localHost(),
-              ...registry
-                .remotePeers()
-                .filter((peer) => peer.peerConfig.enabled)
-                .map((peer) => ({ kind: "remote", peer }) as const),
-            ];
-        const unreachable: Array<{ host: string; error: string }> = [];
-        const agents: ReturnType<typeof summarizeAgent>[] = [];
-        await Promise.all(
-          hosts.map(async (host) => {
-            try {
-              const api = await registry.api(host, input.host ? CONNECT_TIMEOUT_MS : 3_000);
-              const result = await api.agents.list({
-                filter: {
-                  includeArchived: input.includeArchived,
-                  ...(input.statuses ? { statuses: input.statuses } : {}),
-                },
-                sort: [{ key: "updated_at", direction: "desc" }],
-                page: { limit: input.limit },
-              });
-              for (const entry of result.entries) {
-                if (input.cwd && !isWithin(entry.agent.cwd, input.cwd)) continue;
-                agents.push(summarizeAgent(host, entry.agent));
-              }
-            } catch (error) {
-              if (input.host) throw error;
-              unreachable.push({ host: hostLabel(host), error: messageOf(error) });
-            }
-          }),
-        );
-        agents.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-        return { agents, unreachable };
+        return listAgents(registry, input);
       },
     }),
 
@@ -679,68 +652,6 @@ function requireAllowedPath(host: HostRef, cwd: string): void {
   }
 }
 
-export function isAbsolutePath(value: string): boolean {
-  return value.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("\\\\");
-}
-
-/** True when `child` is `parent` or below it. Works for POSIX and Windows paths on any host. */
-export function isWithin(child: string, parent: string): boolean {
-  const c = normalizeRemotePath(child);
-  const p = normalizeRemotePath(parent);
-  if (c === p) return true;
-  const prefix = p.endsWith("/") ? p : `${p}/`;
-  return c.startsWith(prefix);
-}
-
-/**
- * Normalizes a path on another host without touching the local filesystem: resolves `.` and
- * `..`, collapses separators and lowercases Windows paths. Symlinks cannot be resolved remotely,
- * so allowedPaths is a guardrail for agents, not a sandbox.
- */
-export function normalizeRemotePath(value: string): string {
-  const windows = /^[a-zA-Z]:[\\/]/.test(value) || value.includes("\\");
-  const unified = value.replace(/\\/g, "/");
-  const root = /^[a-zA-Z]:\//.test(unified)
-    ? unified.slice(0, 3)
-    : unified.startsWith("/")
-      ? "/"
-      : "";
-  const parts: string[] = [];
-  for (const part of unified.slice(root.length).split("/")) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") parts.pop();
-    else parts.push(part);
-  }
-  const out = `${root}${parts.join("/")}` || root;
-  return windows ? out.toLowerCase() : out;
-}
-
-export function summarizeAgent(host: HostRef, agent: PaseoAgent) {
-  return {
-    host: hostLabel(host),
-    serverId: hostServerId(host),
-    agentId: agent.id,
-    title: agent.title,
-    status: agent.status,
-    provider: agent.model ? `${agent.provider}/${agent.model}` : agent.provider,
-    cwd: agent.cwd,
-    workspaceId: agent.workspaceId ?? null,
-    requiresAttention: agent.requiresAttention ?? false,
-    attentionReason: agent.attentionReason ?? null,
-    createdAt: agent.createdAt,
-    updatedAt: agent.updatedAt,
-    archivedAt: agent.archivedAt ?? null,
-    parentAgentId: agent.labels["paseo.parent-agent-id"] ?? null,
-    meshCaller: agent.labels[MESH_LABEL_CALLER_AGENT]
-      ? {
-          serverId: agent.labels[MESH_LABEL_CALLER_SERVER] ?? null,
-          agentId: agent.labels[MESH_LABEL_CALLER_AGENT],
-          hostname: agent.labels[MESH_LABEL_CALLER_HOST] ?? null,
-        }
-      : null,
-  };
-}
-
 type TimelineItem = Awaited<
   ReturnType<PaseoApi["agents"]["ref"]>["timeline"]["refetch"] extends (
     ...args: never[]
@@ -785,10 +696,6 @@ function stringify(value: unknown): string {
 
 export function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}… [${text.length - max} more chars]` : text;
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 interface ToolSpec<Schema extends z.ZodType> {

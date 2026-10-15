@@ -5,9 +5,9 @@ import {
   meshConfigSchema,
   type PeerConfig,
   type PeerSummary,
-} from "../shared/config";
-import type { Logger } from "./logger";
-import { PeerConnection, PeerUnavailableError, type ServerIdentity } from "./peer-connection";
+} from "../../shared/config";
+import type { Logger } from "../logger";
+import { type Peer, type PeerLifecycle, PeerUnavailableError, type ServerIdentity } from "./peer";
 
 export interface LocalHost {
   readonly kind: "local";
@@ -20,7 +20,7 @@ export interface LocalHost {
 
 export interface RemoteHost {
   readonly kind: "remote";
-  readonly peer: PeerConnection;
+  readonly peer: Peer;
 }
 
 export type HostRef = LocalHost | RemoteHost;
@@ -36,16 +36,12 @@ export interface HostOps {
 
 export interface HostRegistryOptions {
   logger: Logger;
-  clientId: string;
-  appVersion: string;
+  createPeer(config: PeerConfig, lifecycle: PeerLifecycle): Peer;
   localApi(): Promise<PaseoApi>;
   localServerId(): string | null;
   localHostname(): string | null;
   localVersion(): string | null;
-  onPeerConnected?(peer: PeerConnection): void;
-  connectTimeoutMs?: number;
-  retry?: { baseDelayMs: number; maxDelayMs: number };
-  sshCommand?: string;
+  onPeerConnected?(peer: Peer): void;
 }
 
 /**
@@ -70,7 +66,7 @@ export class UnknownHostError extends Error {
  * changing its access never drops its connection.
  */
 export class HostRegistry {
-  private readonly peers = new Map<string, PeerConnection>();
+  private readonly peers = new Map<string, Peer>();
   private config: MeshConfig = meshConfigSchema.parse({});
 
   constructor(private readonly options: HostRegistryOptions) {}
@@ -91,13 +87,7 @@ export class HostRegistry {
         if (!samePeerConfig(existing.peerConfig, peerConfig)) existing.update(peerConfig);
         continue;
       }
-      const peer = new PeerConnection(peerConfig, {
-        clientId: `${this.options.clientId}:${peerConfig.id}`,
-        appVersion: this.options.appVersion,
-        logger: this.options.logger,
-        connectTimeoutMs: this.options.connectTimeoutMs,
-        retry: this.options.retry,
-        ...(this.options.sshCommand ? { sshCommand: this.options.sshCommand } : {}),
+      const peer = this.options.createPeer(peerConfig, {
         validateIdentity: (candidate, identity) => this.validateIdentity(candidate, identity),
         onConnected: (connected) => this.options.onPeerConnected?.(connected),
       });
@@ -116,16 +106,16 @@ export class HostRegistry {
     return this.config.localAccess;
   }
 
-  remotePeers(): PeerConnection[] {
+  remotePeers(): Peer[] {
     return [...this.peers.values()];
   }
 
-  peerById(id: string): PeerConnection | null {
+  peerById(id: string): Peer | null {
     return this.peers.get(id) ?? null;
   }
 
   /** Finds the peer currently or last known to reach `serverId`. */
-  peerByServerId(serverId: string): PeerConnection | null {
+  peerByServerId(serverId: string): Peer | null {
     for (const peer of this.peers.values()) {
       if (peer.identity?.serverId === serverId) return peer;
     }
@@ -224,7 +214,7 @@ export class HostRegistry {
     await Promise.all(peers.map((peer) => peer.close()));
   }
 
-  private validateIdentity(candidate: PeerConnection, identity: ServerIdentity): string | null {
+  private validateIdentity(candidate: Peer, identity: ServerIdentity): string | null {
     const localServerId = this.options.localServerId();
     if (localServerId && identity.serverId === localServerId) {
       return "This peer points back to this daemon; use the local host instead";

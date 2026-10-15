@@ -1,29 +1,21 @@
 import type { PaseoApi } from "@getpaseo/client";
 import { createPaseoApi } from "@getpaseo/client";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { HostStatus, PeerConfig, PeerSummary } from "../shared/config";
+import type { HostStatus, PeerConfig, PeerSummary } from "../../shared/config";
+import { messageOf } from "../errors";
+import type { Logger } from "../logger";
 import {
   type ConnectionTarget,
   describeConnection,
   parseConnectionTarget,
 } from "./connection-target";
-import type { Logger } from "./logger";
+import { type Peer, type PeerLifecycle, PeerUnavailableError, type ServerIdentity } from "./peer";
 import { openSshTunnel, type SshTunnel } from "./ssh-tunnel";
 
-export interface ServerIdentity {
-  serverId: string;
-  hostname: string | null;
-  version: string | null;
-}
-
-export interface PeerConnectionOptions {
+export interface PeerConnectionOptions extends PeerLifecycle {
   clientId: string;
   appVersion: string;
   logger: Logger;
-  /** Called after every successful (re)connection, with the verified identity. */
-  onConnected(peer: PeerConnection): void;
-  /** Returns an error when this identity must not be used (self loop, duplicate peer). */
-  validateIdentity(peer: PeerConnection, identity: ServerIdentity): string | null;
   connectTimeoutMs?: number;
   retry?: { baseDelayMs: number; maxDelayMs: number };
   /** Executable for ssh:// peers; defaults to `ssh` on PATH. */
@@ -43,23 +35,12 @@ type ConnectionState =
   | { status: "offline"; error: string; attempt: number }
   | { status: "error"; error: string };
 
-export class PeerUnavailableError extends Error {
-  constructor(
-    readonly peerName: string,
-    readonly status: HostStatus,
-    detail: string | null,
-  ) {
-    super(`Host "${peerName}" is ${status}${detail ? `: ${detail}` : ""}`);
-    this.name = "PeerUnavailableError";
-  }
-}
-
 /**
  * Owns one supervised connection to a remote daemon. The SDK client's own reconnect is off:
  * every reconnect builds a fresh client, re-verifies the daemon identity, and notifies the
  * owner so subscriptions and watches are re-established against the new session.
  */
-export class PeerConnection {
+export class PeerConnection implements Peer {
   private state: ConnectionState = { status: "disabled" };
   private target: ConnectionTarget | null = null;
   private generation = 0;
@@ -179,11 +160,12 @@ export class PeerConnection {
         );
       }
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(done, remaining);
-        function done() {
+        const done = () => {
           clearTimeout(timer);
+          this.waiters.delete(done);
           resolve();
-        }
+        };
+        const timer = setTimeout(done, remaining);
         this.waiters.add(done);
       });
     }
@@ -404,8 +386,4 @@ export function describeFailure(message: string, lastError: string | null): stri
   if (!lastError || message.includes(lastError)) return message;
   if (lastError.includes(message)) return lastError;
   return `${message} (${lastError})`;
-}
-
-export function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

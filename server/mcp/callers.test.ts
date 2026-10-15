@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { injectionConfigSchema, injectionPatchSchema } from "../shared/config";
+import { injectionConfigSchema, injectionPatchSchema } from "../../shared/config";
 import { pruned } from "./callers";
 
 describe("pruned", () => {

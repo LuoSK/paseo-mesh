@@ -3,8 +3,8 @@ import path from "node:path";
 import type { PaseoApi } from "@getpaseo/client";
 import { createPaseoApi } from "@getpaseo/client";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { Logger } from "./logger";
-import { messageOf } from "./peer-connection";
+import { messageOf } from "../errors";
+import type { Logger } from "../logger";
 
 /**
  * The plugin's view of its own daemon.

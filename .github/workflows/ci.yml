@@ -27,6 +27,9 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      - name: Use the release npm version
+        if: matrix.node == 24
+        run: npm install -g npm@^11.21.0
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
@@ -43,13 +46,12 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
-        with:
-          # The Git-install test clones this checkout.
-          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
+      - name: Use the release npm version
+        run: npm install -g npm@^11.21.0
       - run: npm ci
       - name: End-to-end tests
         run: npm run test:e2e

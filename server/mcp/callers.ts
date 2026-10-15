@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import type { JsonFileStore } from "./json-store";
-import type { McpCaller } from "./mcp-http";
+import type { StateStore } from "../state/json-store";
+import type { McpCaller } from "./http";
 
 /** Env var carrying an agent's caller nonce from agent.create to agent.session_open. */
 export const CALLER_ENV = "PASEO_MESH_CALLER";
@@ -32,7 +32,7 @@ const MAX_CALLERS = 5_000;
 export class CallerRegistry {
   private cache: CallerFile = { version: 1, callers: {} };
 
-  constructor(private readonly store: JsonFileStore<CallerFile>) {}
+  constructor(private readonly store: StateStore<CallerFile>) {}
 
   async load(): Promise<void> {
     this.cache = await this.store.read();

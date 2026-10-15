@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import type { PaseoApi } from "@getpaseo/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { HostRegistry, type WaitForFinishResult } from "./host-registry";
-import { JsonFileStore } from "./json-store";
-import { silentLogger } from "./logger";
+import { HostRegistry, type WaitForFinishResult } from "../hosts/host-registry";
+import { silentLogger } from "../logger";
+import { JsonFileStore } from "../state/json-store";
 import { type Watch, type WatchFile, WatchManager, watchFileSchema } from "./watches";
 
 interface FakeAgent {
@@ -111,8 +111,9 @@ describe("WatchManager", () => {
   function start(local: FakeLocal, options: { orphanTtlMs?: number } = {}) {
     const registry = new HostRegistry({
       logger: silentLogger,
-      clientId: "test",
-      appVersion: "0.0.0",
+      createPeer: () => {
+        throw new Error("Unexpected remote connection");
+      },
       localApi: async () => local.api(),
       localServerId: () => "srv_LOCAL",
       localHostname: () => "test-host",
@@ -264,8 +265,9 @@ describe("WatchManager", () => {
     await watches.start();
     const registry = new HostRegistry({
       logger: silentLogger,
-      clientId: "t",
-      appVersion: "0",
+      createPeer: () => {
+        throw new Error("Unexpected remote connection");
+      },
       localApi: async () => local.api(),
       localServerId: () => "srv_LOCAL",
       localHostname: () => null,

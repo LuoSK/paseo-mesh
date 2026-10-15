@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type McpHttpServer, type McpTool, startMcpHttpServer } from "./mcp-http";
+import { type McpHttpServer, type McpTool, startMcpHttpServer } from "./http";
 
 const TOKEN = "test-token-123";
 

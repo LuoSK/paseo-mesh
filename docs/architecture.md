@@ -7,15 +7,19 @@ paseo-mesh is one Paseo plugin with a server entry (runs in the plugin subproces
 | Module | Owns |
 | --- | --- |
 | `server/runtime.ts` | Wiring: data directory, stores, RPC handlers, lifecycle hooks, MCP server start |
-| `server/host-registry.ts` | `local` plus one `PeerConnection` per configured peer; host resolution; uniform `HostOps` |
-| `server/peer-connection.ts` | One supervised connection to a remote daemon: connect, verify identity, reconnect |
-| `server/connection-target.ts` | Parsing offers, `relay://` URIs and direct endpoints into WebSocket targets |
-| `server/local-connection.ts` | Reaching the plugin's own daemon outside hook and RPC calls |
-| `server/mcp-http.ts` | Minimal MCP server over Streamable HTTP |
-| `server/tools.ts` | The `mesh_*` tools |
-| `server/watches.ts` | Persisted finish notifications for remote work |
-| `server/callers.ts` | Mapping MCP callers to local agent IDs |
-| `server/json-store.ts` | Atomic, owner-only JSON files with external-edit watching |
+| `server/state/settings.ts` | Serialized configuration changes, external reloads, peer CRUD and app host reconciliation |
+| `server/agents/queries.ts` | Typed agent listing and summaries shared by MCP tools and app RPCs |
+| `server/agents/paths.ts` | Portable path validation and containment for remote hosts |
+| `server/hosts/host-registry.ts` | `local` plus one `Peer` per configured host; host resolution; uniform `HostOps` |
+| `server/hosts/peer.ts` | Connection contract, daemon identity and lifecycle callbacks |
+| `server/hosts/peer-connection.ts` | One supervised connection to a remote daemon: connect, verify identity, reconnect |
+| `server/hosts/connection-target.ts` | Parsing offers, `relay://` URIs and direct endpoints into WebSocket targets |
+| `server/hosts/local-connection.ts` | Reaching the plugin's own daemon outside hook and RPC calls |
+| `server/mcp/http.ts` | Minimal MCP server over Streamable HTTP |
+| `server/mcp/tools.ts` | The `mesh_*` tools |
+| `server/agents/watches.ts` | Persisted finish notifications for remote work |
+| `server/mcp/callers.ts` | Mapping MCP callers to local agent IDs |
+| `server/state/json-store.ts` | `StateStore` contract and atomic, owner-only JSON files with external-edit watching |
 | `client/` | Mesh screen and Peers settings |
 | `bin/paseo-mesh.mjs` | CLI that calls the plugin RPCs |
 
@@ -53,9 +57,9 @@ Tool calls without a bound caller still work; they just cannot arm notifications
 
 ## Sender attribution and unknown hosts
 
-`mesh_send_prompt` and `mesh_create_agent` prefix the message with the sending agent and a reply address (`senderHeader` in `server/tools.ts`). The address uses the daemon `serverId`, because peer names are chosen per host while every host resolves a peer by its `serverId`. A bare prompt gives the receiver no way to tell who wrote it, so two agents could not hold a conversation across hosts.
+`mesh_send_prompt` and `mesh_create_agent` prefix the message with the sending agent and a reply address (`senderHeader` in `server/mcp/tools.ts`). The address uses the daemon `serverId`, because peer names are chosen per host while every host resolves a peer by its `serverId`. A bare prompt gives the receiver no way to tell who wrote it, so two agents could not hold a conversation across hosts.
 
-Mesh peers are separate from the hosts the app is connected to: the plugin client sees only the app hosts' ids, labels and status, never their connection details. An agent asked about a host mesh does not know will otherwise improvise, for example by driving the desktop app to copy a pairing link. `ADD_HOST_GUIDANCE` (`server/host-registry.ts`) is returned with `mesh_list_hosts`, in unknown-host errors and in the MCP instructions, and tells the agent to ask the user to add the host instead.
+Mesh peers are separate from the hosts the app is connected to: the plugin client sees only the app hosts' ids, labels and status, never their connection details. An agent asked about a host mesh does not know will otherwise improvise, for example by driving the desktop app to copy a pairing link. `ADD_HOST_GUIDANCE` (`server/hosts/host-registry.ts`) is returned with `mesh_list_hosts`, in unknown-host errors and in the MCP instructions, and tells the agent to ask the user to add the host instead.
 
 ## App host sync
 
@@ -63,13 +67,13 @@ The app stores its Hosts list as JSON under `@paseo:daemon-registry` in AsyncSto
 
 Every host running mesh has its own plugin installation inside the app, and each installation syncs only its own daemon (`mesh.peers.sync`). Installations find each other through a registry on `globalThis`, so one can ask another for its daemon's pairing offer (`mesh.self.describe`, read over the local credential because the plugin API cannot reach `getDaemonPairingOffer`). That offer is how a headless server reaches the laptop the app runs on, which the app itself knows only by a loopback address or socket.
 
-The daemon owns reconciliation. Synced peers carry `origin: app:<appId>` and a pinned `serverId`; a sync adds, updates or removes only peers with its own origin. Peers added by hand are never touched, including one that has not connected yet, which is recognized by its endpoint. Removing a synced peer by hand records its `serverId` in `appSync.excluded` so the next sync does not add it back.
+`MeshSettings` owns reconciliation and checks whether sync is enabled inside the same serialized update as peer changes. Synced peers carry `origin: app:<appId>` and a pinned `serverId`; a sync adds, updates or removes only peers with its own origin. Peers added by hand are never touched, including one that has not connected yet, which is recognized by its endpoint. Removing a synced peer by hand records its `serverId` in `appSync.excluded` so the next sync does not add it back.
 
-`ssh://` peers run `ssh -W` per connection (`server/ssh-tunnel.ts`), the transport Paseo's CLI uses, with `BatchMode=yes` so a missing key fails with SSH's own message instead of waiting on a prompt.
+`ssh://` peers run `ssh -W` per connection (`server/hosts/ssh-tunnel.ts`), the transport Paseo's CLI uses, with `BatchMode=yes` so a missing key fails with SSH's own message instead of waiting on a prompt.
 
 ## Peer connections
 
-Each peer gets a `DaemonClient` from `@getpaseo/client`, wrapped with `createPaseoApi`. The public `createPaseoClient` is not used because mesh needs `getLastServerInfoMessage` (identity), `cancelAgent` and the server-side `waitForFinish`, which only the internal client exposes.
+`HostRegistry` works with the `Peer` contract and receives a connection factory from `MeshRuntime`. `PeerConnection` implements that contract with a `DaemonClient` from `@getpaseo/client`, wrapped with `createPaseoApi`. The public `createPaseoClient` is not used because mesh needs `getLastServerInfoMessage` (identity), `cancelAgent` and the server-side `waitForFinish`, which only the internal client exposes.
 
 The client's own reconnect is disabled. On any disconnect the connection is torn down and a fresh client is built after exponential backoff. Every connection re-verifies identity:
 

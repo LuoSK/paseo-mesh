@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseConnectionTarget } from "../server/connection-target";
+import { parseConnectionTarget } from "../server/hosts/connection-target";
 import {
   type AppHost,
   isOnAppMachine,

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -132,6 +132,38 @@ describe("plugin", () => {
     expect(mesh?.clientBundle.length).toBeGreaterThan(1000);
     const plugins = await client.listPlugins();
     expect(plugins.find((plugin) => plugin.id === "mesh")).toMatchObject({ status: "running" });
+  });
+
+  it("returns the same agent summary through app RPC and MCP", async () => {
+    const agentId = await orchestrator("shared-listing");
+    const app = await a.rpc<{ agents: Array<{ agentId: string; host: string }> }>(
+      "mesh.agents.list",
+      {},
+    );
+    const tools = await callTool<{ agents: Array<{ agentId: string; host: string }> }>(
+      await mcp(),
+      "mesh_list_agents",
+      { limit: 100 },
+    );
+    const fromApp = app.agents.find((agent) => agent.agentId === agentId);
+    expect(fromApp).toMatchObject({ agentId, host: "local" });
+    expect(tools.agents.find((agent) => agent.agentId === agentId)).toMatchObject(fromApp ?? {});
+  });
+
+  it("searches visible Markdown text in a daemon timeline", async () => {
+    const agentId = await createEchoAgent(await a.api(), {
+      cwd: workA,
+      title: "markdown-search",
+      prompt: "**needle** [needle](https://example.test/needle) `needle`",
+    });
+    const client = await a.client();
+    const result = await client.searchAgentTimeline({ agentId, query: "needle" });
+    expect(result.locations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "assistant", count: 3 }),
+        expect.objectContaining({ role: "user", count: 4 }),
+      ]),
+    );
   });
 });
 
@@ -1031,15 +1063,85 @@ describe("conversations between agents on two mesh hosts", () => {
 });
 
 describe("distribution", () => {
+  it("installs the packed npm artifact with its production dependencies", async () => {
+    const source = tempDir("npm-source");
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const exec = promisify(execFile);
+    let daemon: TestDaemon | undefined;
+    try {
+      const { stdout } = await exec("npm", ["pack", "--json", "--pack-destination", source], {
+        cwd: ROOT,
+      });
+      const [{ filename }] = JSON.parse(stdout);
+      await exec(
+        "npm",
+        [
+          "install",
+          "--prefix",
+          source,
+          "--omit=dev",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund",
+          path.join(source, filename),
+        ],
+        { timeout: 120_000 },
+      );
+      daemon = await TestDaemon.start({
+        name: "npm",
+        plugins: [path.join(source, "node_modules", "paseo-mesh")],
+      });
+      await daemon.waitForMesh();
+      const client = await daemon.client();
+      expect((await client.listPlugins()).find((plugin) => plugin.id === "mesh")).toMatchObject({
+        status: "running",
+      });
+      expect(
+        (await client.getPluginCatalog()).find((entry) => entry.id === "mesh")?.clientBundle.length,
+      ).toBeGreaterThan(1000);
+    } finally {
+      await daemon?.destroy();
+      await rm(source, { recursive: true, force: true });
+    }
+  });
+
   it("installs from a Git source with its declared preparation step", async () => {
     const g = await TestDaemon.start({ name: "git", plugins: [] });
-    // CI checks out tags with a detached HEAD, which leaves a clone without origin/HEAD.
-    // Install from a clone of the current commit on a named branch, like a real remote.
     const source = tempDir("git-source");
     const { execFileSync } = await import("node:child_process");
-    execFileSync("git", ["clone", "-q", ROOT, source]);
-    execFileSync("git", ["-C", source, "checkout", "-q", "-B", "mesh-e2e"]);
     try {
+      const files = execFileSync(
+        "git",
+        ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        { cwd: ROOT, encoding: "utf8" },
+      )
+        .split("\0")
+        .filter(Boolean);
+      for (const file of files) {
+        const destination = path.join(source, file);
+        await mkdir(path.dirname(destination), { recursive: true });
+        await cp(path.join(ROOT, file), destination).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        });
+      }
+      execFileSync("git", ["init", "-q", "-b", "mesh-e2e", source]);
+      execFileSync("git", ["-C", source, "add", "."]);
+      execFileSync("git", [
+        "-C",
+        source,
+        "-c",
+        "user.name=Mesh tests",
+        "-c",
+        "user.email=mesh@example.invalid",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "-q",
+        "--no-gpg-sign",
+        "-m",
+        "Mesh installation fixture",
+      ]);
       await g.cli(["plugin", "install", `file://${source}`, "--json"]);
       await g.waitForMesh();
       const client = await g.client();

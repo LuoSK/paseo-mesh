@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  condenseItem,
-  isAbsolutePath,
-  isWithin,
-  normalizeRemotePath,
-  senderHeader,
-  truncate,
-} from "./tools";
+import { isAbsolutePath, isWithin, normalizeRemotePath } from "../agents/paths";
+import { condenseItem, senderHeader, truncate } from "./tools";
 
 describe("normalizeRemotePath", () => {
   it("resolves dot segments and duplicate separators", () => {

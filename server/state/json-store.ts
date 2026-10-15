@@ -4,11 +4,20 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ZodType } from "zod";
 
+/** Serial read-modify-write storage; `after` completes before the next mutation. */
+export interface StateStore<T> {
+  read(): Promise<T>;
+  update(
+    mutate: (current: T) => T | Promise<T>,
+    after?: (value: T) => void | Promise<void>,
+  ): Promise<T>;
+}
+
 /**
  * One JSON document on disk, written atomically with owner-only permissions. Peer passwords
  * and offer keys live here, so the file is never world-readable and never leaves the host.
  */
-export class JsonFileStore<T> {
+export class JsonFileStore<T> implements StateStore<T> {
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(

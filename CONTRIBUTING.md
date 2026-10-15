@@ -6,7 +6,7 @@
 npm install
 ```
 
-Node.js 22 or newer. The end-to-end suite starts Paseo daemons from the `@getpaseo/cli` dev dependency with temporary homes and free ports; it never touches `~/.paseo` or a daemon on port 6767.
+Development requires Node.js 22.12 or newer for Vitest 5. The published plugin supports Node.js 22 or newer. The end-to-end suite starts Paseo daemons from the `@getpaseo/cli` dev dependency with temporary homes and free ports; it never touches `~/.paseo` or a daemon on port 6767.
 
 ## Checks
 
@@ -32,13 +32,15 @@ Paseo compiles the plugin itself and enforces its runtime boundaries:
 
 Server dependencies other than `zod` and `@getpaseo/plugin/*` are bundled from `node_modules`, so they must be in `dependencies`, not `devDependencies`.
 
+Keep React on the plugin SDK's 19.1 line and React Native on the host's 0.81 line; pin their exact patch versions. Keep `@types/node` on Node 22 so typechecking covers the oldest supported runtime. Development overrides cover the daemon's MCP, AI, Markdown and UUID dependencies and NYC's YAML loader. Keep Undici 6 for Node 22.12 compatibility and YAML 4 for configuration merge keys. The end-to-end suite verifies the overridden daemon too.
+
 ## Lockfile
 
-Git installs run `npm ci --omit=dev` with whatever npm the daemon host has, so `package-lock.json` must stay installable by npm 10 (Node 22) as well as npm 11. The Node 22 CI job enforces this. The `esbuild` dev dependency exists only for that: without it, npm 10 and npm 11 disagree about vite's optional `esbuild` peer and npm 10 rejects the lockfile.
+Use npm 10 or 11 for packaging and npm artifact installs: npm 12 ignores `npm-shrinkwrap.json`, which locks the published runtime dependencies. Releases use the latest npm 11. Git installs run `npm ci --omit=dev` with whatever npm the daemon host has, so `package-lock.json` must stay installable by npm 10 (Node 22) as well as npm 11. The Node 22 CI job enforces this. The `esbuild` dev dependency keeps vite's optional peer resolution consistent between those npm versions.
 
 ## Tests
 
-Add behavior tests to the existing suites: unit tests next to the module (`server/*.test.ts`), end-to-end tests in `test/e2e/mesh.e2e.test.ts`. If a scenario needs new agent behavior, extend the echo provider in `test/fixtures/echo-provider` instead of using a real model.
+Add behavior tests to the existing suites: unit tests next to the module (`server/**/*.test.ts`), end-to-end tests in `test/e2e/mesh.e2e.test.ts`. If a scenario needs new agent behavior, extend the echo provider in `test/fixtures/echo-provider` instead of using a real model.
 
 ## Releases
 
