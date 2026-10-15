@@ -704,3 +704,65 @@ describe.runIf(process.env.MESH_E2E_RELAY === "1")("relay (uses relay.paseo.sh)"
     await waitStatus("relay-uri", "online", 60_000);
   });
 });
+
+describe("distribution", () => {
+  it("installs from a Git source with its declared preparation step", async () => {
+    const g = await TestDaemon.start({ name: "git", plugins: [] });
+    try {
+      await g.cli(["plugin", "install", `file://${ROOT}`, "--json"]);
+      await g.waitForMesh();
+      const client = await g.client();
+      const plugins = await client.listPlugins();
+      expect(plugins.find((plugin) => plugin.id === "mesh")).toMatchObject({ status: "running" });
+      const catalog = await client.getPluginCatalog();
+      expect(catalog.find((entry) => entry.id === "mesh")?.clientBundle.length).toBeGreaterThan(
+        1000,
+      );
+    } finally {
+      await g.destroy();
+    }
+  });
+});
+
+describe("paseo-mesh CLI", () => {
+  async function meshCli(args: string[], input?: string): Promise<string> {
+    const { execFile } = await import("node:child_process");
+    return new Promise((resolve, reject) => {
+      const child = execFile(
+        process.execPath,
+        [path.join(ROOT, "bin/paseo-mesh.mjs"), "--home", a.home, ...args],
+        { env: { ...process.env, PASEO_HOME: "" }, timeout: 60_000 },
+        (error, stdout, stderr) =>
+          error ? reject(new Error(`${error.message}\n${stderr}`)) : resolve(stdout),
+      );
+      if (input !== undefined) child.stdin?.end(input);
+    });
+  }
+
+  it("manages peers and reports status through the plugin", async () => {
+    const added = JSON.parse(
+      await meshCli(
+        ["peers", "add", "cli-c", c.endpoint, "--write", "--password-stdin", "--json"],
+        `${PASSWORD}\n`,
+      ),
+    );
+    expect(added).toMatchObject({ name: "cli-c", access: "write", hasPassword: true });
+    await waitStatus("cli-c", "online");
+
+    const text = await meshCli(["status"]);
+    expect(text).toMatch(/cli-c\s+online\s+write/);
+    expect(text).not.toContain(PASSWORD);
+
+    await meshCli(["peers", "set", "cli-c", "--name", "cli-c2", "--read", "--allow", "/srv/work"]);
+    const renamed = await host("cli-c2");
+    expect(renamed).toMatchObject({
+      status: "online",
+      access: "read",
+      allowedPaths: ["/srv/work"],
+    });
+
+    await meshCli(["peers", "remove", added.id]);
+    expect(await host("cli-c2")).toBeUndefined();
+    await expect(meshCli(["peers", "remove", "nope"])).rejects.toThrow(/Unknown peer "nope"/);
+  });
+});
