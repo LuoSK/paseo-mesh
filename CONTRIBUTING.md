@@ -32,6 +32,10 @@ Paseo compiles the plugin itself and enforces its runtime boundaries:
 
 Server dependencies other than `zod` and `@getpaseo/plugin/*` are bundled from `node_modules`, so they must be in `dependencies`, not `devDependencies`.
 
+## Lockfile
+
+Git installs run `npm ci --omit=dev` with whatever npm the daemon host has, so `package-lock.json` must stay installable by npm 10 (Node 22) as well as npm 11. The Node 22 CI job enforces this. The `esbuild` dev dependency exists only for that: without it, npm 10 and npm 11 disagree about vite's optional `esbuild` peer and npm 10 rejects the lockfile.
+
 ## Tests
 
 Add behavior tests to the existing suites: unit tests next to the module (`server/*.test.ts`), end-to-end tests in `test/e2e/mesh.e2e.test.ts`. If a scenario needs new agent behavior, extend the echo provider in `test/fixtures/echo-provider` instead of using a real model.
