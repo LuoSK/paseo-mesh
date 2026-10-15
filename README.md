@@ -43,11 +43,7 @@ Plugins run unsandboxed with the daemon user's access. Install only code you tru
    paseo plugin add git:jtsang4/paseo-mesh
    ```
 
-   or from npm:
-
-   ```bash
-   paseo plugin install npm:paseo-mesh
-   ```
+   or, once a release is on npm, `paseo plugin install npm:paseo-mesh`.
 
 3. Check it is running:
 
@@ -69,9 +65,9 @@ paseo daemon pair            # prints https://app.paseo.sh/#offer=...
 Treat the offer like a password: it lets its holder control that daemon. Then add the peer on the orchestrating host, either in the app (**Settings → Plugins → mesh → Peers → Add a peer**) or from a terminal:
 
 ```bash
-npx paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
-npx paseo-mesh peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
-npx paseo-mesh status
+npx github:jtsang4/paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
+npx github:jtsang4/paseo-mesh peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
+npx github:jtsang4/paseo-mesh status
 ```
 
 | Connection | Use it when |
@@ -193,7 +189,7 @@ paseo-mesh peers retry <peer>
 paseo-mesh settings [--inject|--no-inject] [--preapprove|--no-preapprove] [--local-access read|write]
 ```
 
-Target another daemon with `--home <path>` or `--host <host:port>` (password from `PASEO_PASSWORD`). Add `--json` for machine-readable output.
+Run it with `npx github:jtsang4/paseo-mesh <command>` (or `npx paseo-mesh` once a release is on npm). Target another daemon with `--home <path>` or `--host <host:port>` (password from `PASEO_PASSWORD`). Add `--json` for machine-readable output.
 
 ## Limitations
 

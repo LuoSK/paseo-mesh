@@ -1,6 +1,6 @@
 # Releasing
 
-Releases are cut from `main` by pushing a `vX.Y.Z` tag. The `Release` workflow checks that the tag matches `package.json`, runs every check including the end-to-end suite, publishes to npm when the `NPM_TOKEN` secret is set, and creates a GitHub release from the matching `CHANGELOG.md` section.
+Releases are cut from `main` by pushing a `vX.Y.Z` tag. The `Release` workflow checks that the tag matches `package.json`, runs every check including the end-to-end suite, publishes to npm through trusted publishing, and creates a GitHub release from the matching `CHANGELOG.md` section.
 
 ## Steps
 
@@ -19,7 +19,14 @@ Versions with a prerelease suffix (`1.2.0-beta.1`) publish under the npm `next` 
 
 ## npm
 
-Create an npm automation token with publish rights for `paseo-mesh` and store it as the repository secret `NPM_TOKEN`. Without it the workflow skips publishing and still creates the GitHub release; users can install from Git.
+The workflow publishes with [trusted publishing](https://docs.npmjs.com/trusted-publishers): npm accepts the job's GitHub OIDC token, so there is no npm token secret, and every release carries provenance. The trust relationship is bound to this repository and the `release.yml` workflow filename; renaming the workflow breaks publishing until the relationship is updated:
+
+```bash
+npm trust list paseo-mesh
+npm trust github paseo-mesh --file release.yml --repository jtsang4/paseo-mesh
+```
+
+Both commands need an npm login with 2FA. A version that is already on npm is skipped, so re-running a release only recreates the GitHub release.
 
 ## Paseo registry
 
