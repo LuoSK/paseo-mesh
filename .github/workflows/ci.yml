@@ -32,7 +32,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - name: Package contents
-        run: npm pack --dry-run
+        run: npm run check:package
 
   e2e:
     name: End-to-end (${{ matrix.os }})
