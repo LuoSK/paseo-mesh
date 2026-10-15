@@ -8,6 +8,9 @@ import type { PeerSummary } from "../shared/config";
 import { listMeshAgentsRpc, type MeshAgent, meshStatusRpc } from "../shared/rpc";
 import { statusColor, useStyles } from "./styles";
 
+type Styles = ReturnType<typeof useStyles>;
+type Theme = PluginScreenProps["theme"];
+
 export function MeshScreen({ theme, layout, navigation }: PluginScreenProps) {
   const styles = useStyles(theme, layout.compact);
   const getStatus = useRpc(meshStatusRpc);
@@ -28,91 +31,115 @@ export function MeshScreen({ theme, layout, navigation }: PluginScreenProps) {
     () => new Set(appHosts.filter((host) => host.status === "online").map((host) => host.serverId)),
     [appHosts],
   );
+  const agentsByHost = useMemo(() => {
+    const grouped = new Map<string, MeshAgent[]>();
+    for (const agent of agents.data?.agents ?? []) {
+      grouped.set(agent.host, [...(grouped.get(agent.host) ?? []), agent]);
+    }
+    return grouped;
+  }, [agents.data]);
+
+  const openAgent = (agent: MeshAgent) => {
+    if (!navigation) return null;
+    if (agent.host === "local") return () => navigation.openAgent({ agentId: agent.agentId });
+    if (!agent.serverId || !openable.has(agent.serverId)) return null;
+    const serverId = agent.serverId;
+    return () => navigation.openAgent({ agentId: agent.agentId, serverId });
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.heading}>Hosts</Text>
-      {status.isPending ? <Text style={styles.muted}>Loading…</Text> : null}
-      {status.error ? <Text style={styles.danger}>{String(status.error.message)}</Text> : null}
-      {status.data?.configError ? (
-        <Text style={styles.danger}>Config not applied: {status.data.configError}</Text>
-      ) : null}
-      {status.data?.mcp.error ? (
-        <Text style={styles.danger}>MCP server failed: {status.data.mcp.error}</Text>
-      ) : null}
-      {status.data?.hosts.map((host) => (
-        <HostRow key={host.id} host={host} styles={styles} theme={theme} />
-      ))}
-      {status.data && status.data.hosts.length === 1 ? (
-        <Text style={styles.muted}>
-          No peers yet. Add one under Settings → Plugins → Paseo Mesh → Peers.
-        </Text>
-      ) : null}
-
-      <Text style={[styles.heading, styles.sectionGap]}>Agents</Text>
-      {agents.isPending ? <Text style={styles.muted}>Loading…</Text> : null}
-      {agents.error ? <Text style={styles.danger}>{String(agents.error.message)}</Text> : null}
-      {agents.data?.unreachable.map((entry) => (
-        <Text key={entry.host} style={styles.warning}>
-          {entry.host}: {entry.error}
-        </Text>
-      ))}
-      {agents.data?.agents.length === 0 ? <Text style={styles.muted}>No agents.</Text> : null}
-      {agents.data?.agents.map((agent) => (
-        <AgentRow
-          key={`${agent.serverId ?? agent.host}:${agent.agentId}`}
-          agent={agent}
-          styles={styles}
-          theme={theme}
-          onOpen={
-            navigation &&
-            (agent.host === "local" || (agent.serverId && openable.has(agent.serverId)))
-              ? () =>
-                  navigation.openAgent({
-                    agentId: agent.agentId,
-                    ...(agent.host === "local" || !agent.serverId
-                      ? {}
-                      : { serverId: agent.serverId }),
-                  })
-              : null
-          }
-        />
-      ))}
+      <View style={styles.column}>
+        {status.isPending ? <Text style={styles.muted}>Loading…</Text> : null}
+        {status.error ? <Text style={styles.danger}>{status.error.message}</Text> : null}
+        {status.data?.configError ? (
+          <Text style={styles.danger}>Config not applied: {status.data.configError}</Text>
+        ) : null}
+        {status.data?.mcp.error ? (
+          <Text style={styles.danger}>MCP server failed: {status.data.mcp.error}</Text>
+        ) : null}
+        {status.data?.hosts.map((host) => (
+          <HostCard
+            key={host.id}
+            host={host}
+            agents={agentsByHost.get(host.name) ?? []}
+            loadingAgents={agents.isPending}
+            styles={styles}
+            theme={theme}
+            openAgent={openAgent}
+          />
+        ))}
+        {status.data && status.data.hosts.length === 1 ? (
+          <Text style={styles.muted}>
+            No peers yet. Add one under Settings → Plugins → mesh → Peers.
+          </Text>
+        ) : null}
+      </View>
     </ScrollView>
   );
 }
 
-function HostRow({
+function HostCard({
   host,
+  agents,
+  loadingAgents,
   styles,
   theme,
+  openAgent,
 }: {
   host: PeerSummary;
-  styles: ReturnType<typeof useStyles>;
-  theme: PluginScreenProps["theme"];
+  agents: MeshAgent[];
+  loadingAgents: boolean;
+  styles: Styles;
+  theme: Theme;
+  openAgent(agent: MeshAgent): (() => void) | null;
 }) {
+  const details = [
+    host.local ? "this daemon" : host.endpoint,
+    host.hostname,
+    host.version ? `v${host.version}` : null,
+  ].filter(Boolean);
+  const reachable = host.status === "online";
   return (
-    <View style={styles.row}>
-      <View style={[styles.dot, { backgroundColor: statusColor(theme, host.status) }]} />
-      <View style={styles.rowBody}>
-        <Text style={styles.title}>
-          {host.name}
-          <Text style={styles.muted}>
-            {"  "}
-            {host.status} · {host.access}
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <View style={[styles.dot, { backgroundColor: statusColor(theme, host.status) }]} />
+        <View style={styles.rowBody}>
+          <View style={styles.titleLine}>
+            <Text style={styles.hostName}>{host.name}</Text>
+            <Text style={styles.badge}>{host.status}</Text>
+            <Text style={styles.badge}>
+              {host.access === "write" ? "read & write" : "read only"}
+            </Text>
+          </View>
+          <Text style={styles.muted} numberOfLines={1}>
+            {details.join(" · ")}
           </Text>
-        </Text>
-        <Text style={styles.muted} numberOfLines={1}>
-          {host.local ? "this daemon" : host.endpoint}
-          {host.hostname ? ` · ${host.hostname}` : ""}
-          {host.version ? ` · v${host.version}` : ""}
-        </Text>
-        {host.error ? (
-          <Text style={styles.danger} numberOfLines={2}>
-            {host.error}
+          {host.error ? (
+            <Text style={styles.danger} numberOfLines={2}>
+              {host.error}
+            </Text>
+          ) : null}
+        </View>
+        {reachable ? (
+          <Text style={styles.count}>
+            {agents.length} {agents.length === 1 ? "agent" : "agents"}
           </Text>
         ) : null}
       </View>
+      {reachable && loadingAgents ? <Text style={styles.agentEmpty}>Loading agents…</Text> : null}
+      {reachable && !loadingAgents && agents.length === 0 ? (
+        <Text style={styles.agentEmpty}>No active agents</Text>
+      ) : null}
+      {agents.map((agent) => (
+        <AgentRow
+          key={agent.agentId}
+          agent={agent}
+          styles={styles}
+          theme={theme}
+          onOpen={openAgent(agent)}
+        />
+      ))}
     </View>
   );
 }
@@ -124,20 +151,18 @@ function AgentRow({
   onOpen,
 }: {
   agent: MeshAgent;
-  styles: ReturnType<typeof useStyles>;
-  theme: PluginScreenProps["theme"];
+  styles: Styles;
+  theme: Theme;
   onOpen: (() => void) | null;
 }) {
+  const state = agentState(agent);
   const body = (
-    <View style={styles.row}>
+    <View style={styles.agentRow}>
       <View
         style={[
-          styles.dot,
+          styles.smallDot,
           {
-            backgroundColor: statusColor(
-              theme,
-              agent.requiresAttention ? "attention" : agent.status,
-            ),
+            backgroundColor: statusColor(theme, state.tone),
           },
         ]}
       />
@@ -146,11 +171,7 @@ function AgentRow({
           {agent.title ?? agent.agentId}
         </Text>
         <Text style={styles.muted} numberOfLines={1}>
-          {agent.host} · {agent.status}
-          {agent.attentionReason ? ` (${agent.attentionReason})` : ""} · {agent.provider}
-        </Text>
-        <Text style={styles.muted} numberOfLines={1}>
-          {agent.cwd}
+          {state.label} · {agent.provider} · {agent.cwd}
         </Text>
       </View>
     </View>
@@ -165,4 +186,18 @@ function AgentRow({
       {body}
     </Pressable>
   );
+}
+
+/** One label per agent: the live state wins over a reason left from the previous turn. */
+function agentState(agent: MeshAgent): { label: string; tone: string } {
+  if (agent.status === "running" || agent.status === "initializing") {
+    return { label: agent.status, tone: "running" };
+  }
+  if (agent.status === "error") return { label: "error", tone: "error" };
+  if (agent.requiresAttention && agent.attentionReason) {
+    const label =
+      agent.attentionReason === "permission" ? "needs permission" : agent.attentionReason;
+    return { label, tone: agent.attentionReason === "error" ? "error" : "attention" };
+  }
+  return { label: agent.status, tone: agent.status };
 }

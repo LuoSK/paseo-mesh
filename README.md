@@ -6,6 +6,8 @@ Paseo's built-in orchestration (`create_agent`, `send_agent_prompt`, finish noti
 
 [中文说明](README.zh-CN.md)
 
+![The Mesh screen: this laptop, a GPU box reached through the Paseo relay, and an offline office Mac, each with its agents](docs/images/mesh-screen.png)
+
 ```
 laptop (paseo-mesh installed)                    gpu-box, office-mac (plain Paseo)
 ┌────────────────────────────────────┐
@@ -96,6 +98,10 @@ The agent calls `mesh_create_agent` and gets on with other work. When the remote
 All 412 cases passed …
 </agent-response>
 ```
+
+Here an agent on the laptop runs a release check on gpu-box. It looks up the hosts, sees what else is running there, starts a test agent, and gets on with other work. When the remote agent finishes, its report arrives as a message and the laptop agent gives a go/no-go:
+
+![A laptop agent delegating a test run to gpu-box and receiving the finish notification](docs/images/cross-host-conversation.png)
 
 Open **Mesh** in the app sidebar to see every host and its agents. Agents on hosts that the app is also connected to open directly.
 

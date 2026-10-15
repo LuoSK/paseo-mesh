@@ -25,6 +25,7 @@
     "OVERVIEW.md",
     "index.client.tsx",
     "index.server.ts",
+    "docs/images/",
     "bin/",
     "client/",
     "server/",

@@ -6,6 +6,8 @@ Paseo 自带的编排能力（`create_agent`、`send_agent_prompt`、完成通�
 
 [English](README.md)
 
+![Mesh 页面：本机、通过 Paseo relay 连接的 GPU 服务器、一台离线的办公室 Mac，以及各自的 agent](docs/images/mesh-screen.png)
+
 ```
 笔记本（安装 paseo-mesh）                          gpu-box、office-mac（普通 Paseo）
 ┌────────────────────────────────────┐
@@ -96,6 +98,10 @@ agent 调用 `mesh_create_agent` 后会继续做别的事。远端 agent 完成�
 All 412 cases passed …
 </agent-response>
 ```
+
+下图中，笔记本上的 agent 在 gpu-box 上跑发布前检查：它先查看有哪些 host、gpu-box 上还在跑什么，然后创建测试 agent，自己去做别的事。远端 agent 完成后，报告以消息形式送回，笔记本上的 agent 据此给出能否发布的结论：
+
+![笔记本上的 agent 把测试交给 gpu-box，并收到完成通知](docs/images/cross-host-conversation.png)
 
 在 App 侧边栏打开 **Mesh**，可以看到所有 host 和它们的 agent。如果 App 也连着某台 host，点那台 host 上的 agent 可以直接打开。
 
