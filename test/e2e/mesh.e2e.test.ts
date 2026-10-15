@@ -113,6 +113,17 @@ afterAll(async () => {
   await Promise.all([workA, workB].map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
+describe("plugin", () => {
+  it("compiles its client bundle and reports running", async () => {
+    const client = await a.client();
+    const catalog = await client.getPluginCatalog();
+    const mesh = catalog.find((entry) => entry.id === "mesh");
+    expect(mesh?.clientBundle.length).toBeGreaterThan(1000);
+    const plugins = await client.listPlugins();
+    expect(plugins.find((plugin) => plugin.id === "mesh")).toMatchObject({ status: "running" });
+  });
+});
+
 describe("injection", () => {
   it("gives new agents the mesh MCP server and binds them as callers", async () => {
     const id = await orchestrator("inject");

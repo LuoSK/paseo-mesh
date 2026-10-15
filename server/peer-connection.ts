@@ -54,7 +54,7 @@ export class PeerConnection {
   private state: ConnectionState = { status: "disabled" };
   private target: ConnectionTarget | null = null;
   private generation = 0;
-  private retryTimer: NodeJS.Timeout | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly waiters = new Set<() => void>();
   private lastIdentity: ServerIdentity | null = null;
 

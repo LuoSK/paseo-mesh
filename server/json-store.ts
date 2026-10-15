@@ -76,7 +76,7 @@ export class JsonFileStore<T> {
   watch(onChange: () => void, debounceMs = 150): () => void {
     const dir = path.dirname(this.filePath);
     const base = path.basename(this.filePath);
-    let timer: NodeJS.Timeout | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     let watcher: FSWatcher | null = null;
     let closed = false;
     const start = async () => {
