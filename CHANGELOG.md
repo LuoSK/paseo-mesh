@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-15
+
+### Changed
+
+- README: install from npm and run the CLI with `npx paseo-mesh`.
+- Release documentation for npm trusted publishing and npm's review of new versions.
+- First release published from GitHub Actions through npm trusted publishing, with provenance.
+
 ## [0.1.0] - 2026-10-15
 
 ### Added
@@ -17,5 +25,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Mesh screen, Peers settings screen and Command Center entries in the Paseo app.
 - `paseo-mesh` CLI for headless peer management.
 
-[Unreleased]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jtsang4/paseo-mesh/releases/tag/v0.1.0

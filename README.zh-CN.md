@@ -45,7 +45,11 @@ Paseo 自带的编排能力（`create_agent`、`send_agent_prompt`、完成通�
    paseo plugin add git:jtsang4/paseo-mesh
    ```
 
-   发布到 npm 之后，也可以用 `paseo plugin install npm:paseo-mesh` 安装。
+   或从 npm 安装：
+
+   ```bash
+   paseo plugin install npm:paseo-mesh
+   ```
 
 3. 确认它在运行：
 
@@ -67,9 +71,9 @@ paseo daemon pair            # 输出 https://app.paseo.sh/#offer=...
 offer 要像密码一样保管：拿到它就能控制那台 daemon。然后在编排 host 上添加 peer，可以在 App 里操作（**Settings → Plugins → mesh → Peers → Add a peer**），也可以用命令行：
 
 ```bash
-npx github:jtsang4/paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
-npx github:jtsang4/paseo-mesh peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
-npx github:jtsang4/paseo-mesh status
+npx paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
+npx paseo-mesh peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
+npx paseo-mesh status
 ```
 
 | 连接方式 | 适用场景 |

@@ -22,11 +22,13 @@ Versions with a prerelease suffix (`1.2.0-beta.1`) publish under the npm `next` 
 The workflow publishes with [trusted publishing](https://docs.npmjs.com/trusted-publishers): npm accepts the job's GitHub OIDC token, so there is no npm token secret, and every release carries provenance. The trust relationship is bound to this repository and the `release.yml` workflow filename; renaming the workflow breaks publishing until the relationship is updated:
 
 ```bash
-npm trust list paseo-mesh
-npm trust github paseo-mesh --file release.yml --repository jtsang4/paseo-mesh
+npx npm@latest trust list paseo-mesh
+npx npm@latest trust github paseo-mesh --file release.yml --repository jtsang4/paseo-mesh --allow-publish
 ```
 
-Both commands need an npm login with 2FA. A version that is already on npm is skipped, so re-running a release only recreates the GitHub release.
+Both commands need an npm login with 2FA; older npm 11 releases answer the second with a bare `400`. A version that is already on npm is skipped, so re-running a release only creates the GitHub release.
+
+npm reviews new versions before they go live. The publish request returns `202 Accepted`, the package page shows a holding version for a few minutes, and `npm view` may lag behind. Wait for `npm view paseo-mesh@X.Y.Z version` before announcing a release.
 
 ## Paseo registry
 
