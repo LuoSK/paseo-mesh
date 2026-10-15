@@ -62,13 +62,15 @@ Update later with `paseo plugin update mesh`.
 
 ## Connect your hosts
 
-On each machine you want to reach, get a pairing offer:
+Mesh keeps its own list of peers. Hosts you added to the Paseo app are not peers until you add them here, and agents can only reach the hosts in this list. The Peers settings screen lists the app's hosts that mesh cannot reach yet.
+
+Get a pairing link for each machine you want to reach, either in the app (**Settings → that host → Pair device**, copy the link) or on the machine itself:
 
 ```bash
 paseo daemon pair            # prints https://app.paseo.sh/#offer=...
 ```
 
-Treat the offer like a password: it lets its holder control that daemon. Then add the peer on the orchestrating host, either in the app (**Settings → Plugins → mesh → Peers → Add a peer**) or from a terminal:
+Treat the link like a password: it lets its holder control that daemon. Then add the peer on the orchestrating host, either in the app (**Settings → Plugins → mesh → Peers → Add a peer**) or from a terminal:
 
 ```bash
 npx paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
@@ -108,6 +110,17 @@ Here an agent on the laptop runs a release check on gpu-box. It looks up the hos
 ![A laptop agent delegating a test run to gpu-box and receiving the finish notification](docs/images/cross-host-conversation.png)
 
 Open **Mesh** in the app sidebar to see every host and its agents. Agents on hosts that the app is also connected to open directly.
+
+### Agents talking across hosts
+
+Messages sent with `mesh_send_prompt` or `mesh_create_agent` start with a header naming the sender and how to answer:
+
+```
+[paseo-mesh] Message from agent 3f2c… on host MacBook Pro, srv_….
+To reply, call mesh_send_prompt with host "srv_…" and agentId "3f2c…".
+```
+
+When both hosts run mesh and list each other as peers, the receiving agent can answer with `mesh_send_prompt`, so agents on two machines can hold a conversation. The reply address uses the sender's daemon `serverId`, which works whatever name the other host gave the peer. Pass `includeSender: false` to send the bare prompt. If the sender asked to be notified, the header tells the receiver its final response already reaches the sender, to avoid duplicate replies.
 
 ### Tools
 

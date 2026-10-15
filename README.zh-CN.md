@@ -62,13 +62,15 @@ Paseo 自带的编排能力（`create_agent`、`send_agent_prompt`、完成通�
 
 ## 连接你的 host
 
-在每台要访问的机器上生成配对 offer：
+mesh 有自己的 peer 列表。你在 Paseo App 里添加的主机，要在这里加为 peer 之后 agent 才能访问；agent 只能访问列表里的 host。Peers 设置页会列出 App 里已连接、但 mesh 还不能访问的主机。
+
+给每台要访问的机器拿一个配对链接：可以在 App 里打开 **Settings → 那台主机 → Pair device** 复制链接，也可以在那台机器上运行：
 
 ```bash
 paseo daemon pair            # 输出 https://app.paseo.sh/#offer=...
 ```
 
-offer 要像密码一样保管：拿到它就能控制那台 daemon。然后在编排 host 上添加 peer，可以在 App 里操作（**Settings → Plugins → mesh → Peers → Add a peer**），也可以用命令行：
+配对链接要像密码一样保管：拿到它就能控制那台 daemon。然后在编排 host 上添加 peer，可以在 App 里操作（**Settings → Plugins → mesh → Peers → Add a peer**），也可以用命令行：
 
 ```bash
 npx paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
@@ -108,6 +110,17 @@ All 412 cases passed …
 ![笔记本上的 agent 把测试交给 gpu-box，并收到完成通知](docs/images/cross-host-conversation.png)
 
 在 App 侧边栏打开 **Mesh**，可以看到所有 host 和它们的 agent。如果 App 也连着某台 host，点那台 host 上的 agent 可以直接打开。
+
+### 不同 host 上的 agent 互相对话
+
+用 `mesh_send_prompt` 或 `mesh_create_agent` 发出的消息，开头会带上发送方和回复方法：
+
+```
+[paseo-mesh] Message from agent 3f2c… on host MacBook Pro, srv_….
+To reply, call mesh_send_prompt with host "srv_…" and agentId "3f2c…".
+```
+
+两台 host 都装了 mesh 并互相配成 peer 后，收到消息的 agent 可以用 `mesh_send_prompt` 回复，两台机器上的 agent 就能来回对话。回复地址用的是发送方 daemon 的 `serverId`，不管对方给这个 peer 起了什么名字都能用。传 `includeSender: false` 可以只发原始内容。如果发送方开了完成通知，消息头会告诉接收方“最终回复会自动送达”，避免重复回复。
 
 工具列表、权限要求和配置项见[英文 README](README.md#tools)。
 

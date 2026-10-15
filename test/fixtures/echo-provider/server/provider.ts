@@ -18,6 +18,8 @@ import {
 //   ENV <name>                     reply with the session env value
 //   MCP <server> <tool> <json>     call an injected HTTP MCP tool, reply with its text
 //   PERMIT <text>                  ask for permission, reply with the decision
+//   REPLY <text>                   answer a [paseo-mesh] message through mesh_send_prompt
+// A leading [paseo-mesh] sender header is split off first, as an agent would read it.
 
 const CAPABILITIES = [
   "permission",
@@ -274,7 +276,8 @@ async function prompt(
     state.emit({ type: "session.turn", sessionId: input.sessionId, turnId, state: "completed" });
   };
 
-  const [command = "", ...rest] = text.trim().split(/\s+/);
+  const { header, body } = splitMeshHeader(text);
+  const [command = "", ...rest] = body.trim().split(/\s+/);
   try {
     switch (command.toUpperCase()) {
       case "SLEEP": {
@@ -332,12 +335,36 @@ async function prompt(
         finish({ reply: await callMcpTool(config, tool, args) });
         return;
       }
+      case "REPLY": {
+        const address = /host "([^"]+)" and agentId "([^"]+)"/.exec(header ?? "");
+        const config = session.config.mcpServers.mesh;
+        if (!address || !config) {
+          finish({ reply: "MCP error: no sender to reply to" });
+          return;
+        }
+        const result = await callMcpTool(config, "mesh_send_prompt", {
+          host: address[1],
+          agentId: address[2],
+          prompt: rest.join(" "),
+          notifyOnFinish: false,
+        });
+        finish({ reply: result });
+        return;
+      }
       default:
-        finish({ reply: `Echo: ${text}` });
+        finish({ reply: `Echo: ${body}` });
     }
   } catch (error) {
     finish({ error: error instanceof Error ? error.message : String(error) });
   }
+}
+
+function splitMeshHeader(text: string): { header: string | null; body: string } {
+  if (!text.startsWith("[paseo-mesh] Message from")) return { header: null, body: text };
+  const split = text.indexOf("\n\n");
+  return split === -1
+    ? { header: text, body: "" }
+    : { header: text.slice(0, split), body: text.slice(split + 2) };
 }
 
 async function callMcpTool(

@@ -2,6 +2,7 @@ import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
 import { z } from "zod";
 import { LOCAL_HOST_NAME } from "../shared/config";
 import {
+  ADD_HOST_GUIDANCE,
   type HostRef,
   type HostRegistry,
   hostAccess,
@@ -99,6 +100,12 @@ const schemas = {
       .describe(
         "Get a message when the agent finishes, errors or needs permission. Set false only for fire-and-forget work.",
       ),
+    includeSender: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Start the message with your agent id, host and serverId so the receiving agent knows who wrote it and can reply with mesh_send_prompt.",
+      ),
   }),
   sendPrompt: z.object({
     host: hostParam,
@@ -110,7 +117,18 @@ const schemas = {
       .describe(
         "If the agent is mid-turn: steer adds the message to the running turn, interrupt cancels it and starts a new one.",
       ),
-    notifyOnFinish: z.boolean().default(true),
+    notifyOnFinish: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Get a message when the agent finishes, errors or needs permission. When replying to a mesh message, set false unless you need its next result.",
+      ),
+    includeSender: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Start the message with your agent id, host and serverId so the receiving agent knows who wrote it and can reply with mesh_send_prompt.",
+      ),
   }),
   waitAgent: z.object({
     host: hostParam,
@@ -174,7 +192,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
       name: "mesh_list_hosts",
       title: "List mesh hosts",
       description:
-        "List the Paseo hosts this agent can reach: this daemon (local) and every configured peer, with connection status, daemon identity and access level (read or write).",
+        "List the Paseo hosts this agent can reach: this daemon (local) and every configured peer, with connection status, daemon identity and access level (read or write). Call this first whenever the user names another machine or host. A host that is not listed must be added by the user; do not reach it any other way.",
       schema: schemas.listHosts,
       readOnly: true,
       async run() {
@@ -191,6 +209,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
             error: summary.error,
             allowedPaths: summary.allowedPaths,
           })),
+          guidance: ADD_HOST_GUIDANCE,
         };
       },
     }),
@@ -399,7 +418,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
             ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
           },
           ...(input.title ? { title: input.title } : {}),
-          prompt: input.prompt,
+          prompt: withSender(context, input, callerAgentId),
           labels,
         });
         const notify = await armNotification(
@@ -428,7 +447,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
       name: "mesh_send_prompt",
       title: "Send a prompt to an agent on a host",
       description:
-        "Send a follow-up task or message to an existing agent on any host. Returns once the host accepts it. By default you get a message when the agent finishes, errors or needs permission.",
+        "Send a follow-up task or message to an existing agent on any host, or reply to a [paseo-mesh] message using the host and agentId it names. Returns once the host accepts it. By default you get a message when the agent finishes, errors or needs permission.",
       schema: schemas.sendPrompt,
       readOnly: false,
       async run(input, caller) {
@@ -437,10 +456,10 @@ export function createMeshTools(context: ToolContext): McpTool[] {
         const api = await registry.api(host, CONNECT_TIMEOUT_MS);
         const agent = await requireAgent(api, host, input.agentId);
         requireAllowedPath(host, agent.cwd);
-        await api.agents.ref(agent.id).send(input.prompt, {
+        const callerAgentId = context.resolveCaller(caller);
+        await api.agents.ref(agent.id).send(withSender(context, input, callerAgentId), {
           activeTurnBehavior: input.activeTurnBehavior,
         });
-        const callerAgentId = context.resolveCaller(caller);
         const notify = await armNotification(
           context,
           host,
@@ -558,6 +577,45 @@ export function createMeshTools(context: ToolContext): McpTool[] {
       },
     }),
   ];
+}
+
+/**
+ * Prefixes a message with who sent it and how to answer, so agents on different hosts can hold
+ * a conversation. The serverId is used as the reply host because it resolves on every host
+ * that has this daemon as a peer, whatever name that host gave it.
+ */
+export function senderHeader(sender: {
+  agentId: string | null;
+  serverId: string | null;
+  hostname: string | null;
+  notifyOnFinish: boolean;
+}): string {
+  const where = [sender.hostname, sender.serverId].filter(Boolean).join(", ") || "another host";
+  if (!sender.agentId || !sender.serverId) {
+    return `[paseo-mesh] Message from ${where}. The sender is not an agent you can reply to.`;
+  }
+  const replyTo = `mesh_send_prompt with host "${sender.serverId}" and agentId "${sender.agentId}"`;
+  return [
+    `[paseo-mesh] Message from agent ${sender.agentId} on host ${where}.`,
+    sender.notifyOnFinish
+      ? `The sender receives your final response when this turn ends. To send it anything earlier, call ${replyTo}.`
+      : `To reply, call ${replyTo}.`,
+  ].join("\n");
+}
+
+function withSender(
+  context: ToolContext,
+  input: { prompt: string; includeSender: boolean; notifyOnFinish: boolean },
+  callerAgentId: string | null,
+): string {
+  if (!input.includeSender) return input.prompt;
+  const header = senderHeader({
+    agentId: callerAgentId,
+    serverId: context.localServerId(),
+    hostname: context.localHostname(),
+    notifyOnFinish: input.notifyOnFinish && callerAgentId !== null,
+  });
+  return `${header}\n\n${input.prompt}`;
 }
 
 async function armNotification(

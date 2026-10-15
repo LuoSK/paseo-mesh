@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-15
+
+### Added
+
+- Messages from `mesh_send_prompt` and `mesh_create_agent` start with the sending agent and a reply address, so agents on two mesh hosts can hold a conversation. `includeSender: false` sends the bare prompt.
+- The Peers settings screen lists hosts the app is connected to that mesh cannot reach yet, with where to copy their pairing link and a prefilled name.
+
+### Fixed
+
+- An agent asked about a host that is not a mesh peer now gets clear instructions to ask the user to add it, instead of a bare list that led agents to improvise through UI automation.
+
 ## [0.1.2] - 2026-10-15
 
 ### Fixed
@@ -36,7 +47,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Mesh screen, Peers settings screen and Command Center entries in the Paseo app.
 - `paseo-mesh` CLI for headless peer management.
 
-[Unreleased]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jtsang4/paseo-mesh/releases/tag/v0.1.0

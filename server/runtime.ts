@@ -25,7 +25,7 @@ import {
 import { MESH_VERSION, PASEO_CLIENT_APP_VERSION } from "../shared/version";
 import { CALLER_ENV, CallerRegistry, callerFileSchema } from "./callers";
 import { parseConnectionTarget } from "./connection-target";
-import { HostRegistry } from "./host-registry";
+import { ADD_HOST_GUIDANCE, HostRegistry } from "./host-registry";
 import { JsonFileStore } from "./json-store";
 import { LocalConnection } from "./local-connection";
 import { consoleLogger, type Logger } from "./logger";
@@ -469,8 +469,10 @@ export class MeshRuntime {
 
 export const MCP_INSTRUCTIONS = `paseo-mesh connects this agent to other Paseo hosts (daemons on other machines).
 Use mesh_list_hosts first. Identify agents by (host, agentId); "${LOCAL_HOST_NAME}" is this machine.
+${ADD_HOST_GUIDANCE}
 Paths, providers and models always refer to the host you name. Files are not shared between hosts: hand work over through git or messages.
-When you create or prompt an agent with notifyOnFinish (default), you receive a message when it finishes, errors or needs permission. Do not poll.`;
+When you create or prompt an agent with notifyOnFinish (default), you receive a message when it finishes, errors or needs permission. Do not poll.
+Messages that start with "[paseo-mesh] Message from agent ..." come from an agent on another host. Answer them with mesh_send_prompt using the host and agentId the header names, with notifyOnFinish false unless you need the sender's next result.`;
 
 /** True for this plugin's MCP endpoint, on its current or any earlier loopback port. */
 function isMeshUrl(url: string, current: string): boolean {

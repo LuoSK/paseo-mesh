@@ -51,6 +51,12 @@ A config copied from another agent (a schedule, for example) carries that agent'
 
 Tool calls without a bound caller still work; they just cannot arm notifications. `callers.json` drops unbound nonces after a day and keeps at most 5,000 entries.
 
+## Sender attribution and unknown hosts
+
+`mesh_send_prompt` and `mesh_create_agent` prefix the message with the sending agent and a reply address (`senderHeader` in `server/tools.ts`). The address uses the daemon `serverId`, because peer names are chosen per host while every host resolves a peer by its `serverId`. A bare prompt gives the receiver no way to tell who wrote it, so two agents could not hold a conversation across hosts.
+
+Mesh peers are separate from the hosts the app is connected to: the plugin client sees only the app hosts' ids, labels and status, never their connection details. An agent asked about a host mesh does not know will otherwise improvise, for example by driving the desktop app to copy a pairing link. `ADD_HOST_GUIDANCE` (`server/host-registry.ts`) is returned with `mesh_list_hosts`, in unknown-host errors and in the MCP instructions, and tells the agent to ask the user to add the host instead.
+
 ## Peer connections
 
 Each peer gets a `DaemonClient` from `@getpaseo/client`, wrapped with `createPaseoApi`. The public `createPaseoClient` is not used because mesh needs `getLastServerInfoMessage` (identity), `cancelAgent` and the server-side `waitForFinish`, which only the internal client exposes.

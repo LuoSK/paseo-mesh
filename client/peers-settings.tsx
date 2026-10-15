@@ -1,5 +1,5 @@
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { useRpc } from "@getpaseo/plugin/client";
+import { type PluginHostSummary, useHosts, useRpc } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/react-native";
 import {
   SettingsAction,
@@ -41,6 +41,15 @@ export function PeersSettings({ theme }: PluginSurfaceProps) {
   const text = useMemo(() => ({ color: theme.colors.foreground }), [theme]);
   const muted = useMemo(() => ({ color: theme.colors.foregroundMuted, fontSize: 12 }), [theme]);
   const danger = useMemo(() => ({ color: theme.colors.statusDanger, fontSize: 12 }), [theme]);
+  const appHosts = useHosts();
+  const [prefill, setPrefill] = useState<{ name: string; key: number }>({ name: "", key: 0 });
+  // Hosts this app is connected to that mesh cannot reach yet, matched by daemon identity.
+  const missing = useMemo(() => {
+    const known = new Set(
+      (status.data?.hosts ?? []).map((host) => host.serverId).filter((id): id is string => !!id),
+    );
+    return appHosts.filter((host) => !known.has(host.serverId));
+  }, [appHosts, status.data]);
 
   if (status.isPending) return <Text style={text}>Loading…</Text>;
   if (status.error) {
@@ -69,7 +78,16 @@ export function PeersSettings({ theme }: PluginSurfaceProps) {
           <PeerCard key={peer.id} peer={peer} theme={theme} />
         ))}
       </SettingsSection>
-      <AddPeer />
+      {missing.length > 0 ? (
+        <AppHosts
+          hosts={missing}
+          theme={theme}
+          onUse={(host) =>
+            setPrefill((current) => ({ name: peerNameFor(host.label), key: current.key + 1 }))
+          }
+        />
+      ) : null}
+      <AddPeer key={prefill.key} initialName={prefill.name} />
       <AgentAccess
         localAccess={status.data.localAccess}
         injection={status.data.injection}
@@ -234,12 +252,53 @@ function EditPeer({ peer, onDone }: { peer: PeerSummary; onDone(): void }) {
   );
 }
 
-function AddPeer() {
+function AppHosts({
+  hosts,
+  theme,
+  onUse,
+}: {
+  hosts: readonly PluginHostSummary[];
+  theme: PluginSurfaceProps["theme"];
+  onUse(host: PluginHostSummary): void;
+}) {
+  const muted = { color: theme.colors.foregroundMuted, fontSize: 12 };
+  return (
+    <SettingsSection title="Hosts in this app that mesh cannot reach yet">
+      <Text style={muted}>
+        Agents can only use hosts added here. For each host: in this app open Settings → that host →
+        Pair device, copy the link, then paste it as the connection below.
+      </Text>
+      <SettingsCard>
+        {hosts.map((host) => (
+          <SettingsAction
+            key={host.serverId}
+            label={host.label}
+            hint={`${host.status} · ${host.serverId}`}
+            actionLabel="Add as peer"
+            onPress={() => onUse(host)}
+          />
+        ))}
+      </SettingsCard>
+    </SettingsSection>
+  );
+}
+
+/** Turns an app host label into a valid peer name, e.g. "Devbox CN" → "devbox-cn". */
+export function peerNameFor(label: string): string {
+  const name = label
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[^a-z0-9]+|-+$/g, "")
+    .slice(0, 63);
+  return name && name !== "local" ? name : "";
+}
+
+function AddPeer({ initialName }: { initialName: string }) {
   const toast = useToast();
   const refresh = useRefresh();
   const add = useRpc(addPeerRpc);
   const [formKey, setFormKey] = useState(0);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const [connection, setConnection] = useState("");
   const [password, setPassword] = useState("");
   const [access, setAccess] = useState<AccessLevel>("read");
@@ -272,11 +331,12 @@ function AddPeer() {
           label="Name"
           hint="Lowercase letters, digits, '.', '_' or '-'. Agents address the host by this name."
           placeholder="gpu-box"
+          initialValue={initialName}
           onChangeText={setName}
         />
         <SettingsInput
           label="Connection"
-          hint="Pairing offer URL from `paseo daemon pair` on that host, or host:port / ws:// / wss://"
+          hint="Pairing link from Settings → that host → Pair device in this app, or from `paseo daemon pair` on that host. host:port, ws:// and wss:// work for direct connections."
           placeholder="https://app.paseo.sh/#offer=…"
           onChangeText={setConnection}
         />

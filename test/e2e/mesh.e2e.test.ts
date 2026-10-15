@@ -818,6 +818,89 @@ describe.runIf(process.env.MESH_E2E_RELAY === "1")("relay (uses relay.paseo.sh)"
   });
 });
 
+describe("conversations between agents on two mesh hosts", () => {
+  let d: TestDaemon;
+
+  beforeAll(async () => {
+    d = await TestDaemon.start({ name: "d", plugins: [ROOT, ECHO_PROVIDER_DIR] });
+    await d.waitForMesh();
+  });
+
+  afterAll(async () => {
+    await d?.destroy();
+  });
+
+  it("delivers a message with its sender and carries the reply back", async () => {
+    await addPeer("d", d.endpoint);
+    await waitStatus("d", "online");
+    await d.rpc("mesh.peers.add", { name: "a", connection: a.endpoint, access: "write" });
+    await waitFor(async () => {
+      const hosts = (await d.rpc<Status>("mesh.status", {})).hosts;
+      return hosts.find((host) => host.name === "a")?.status === "online";
+    });
+
+    const parent = await orchestrator("conversation-a");
+    const dApi = await d.api();
+    const responder = await createEchoAgent(dApi, {
+      cwd: workB,
+      title: "responder-d",
+      prompt: "ready",
+    });
+
+    const client = await mcp(parent);
+    await callTool(client, "mesh_send_prompt", {
+      host: "d",
+      agentId: responder,
+      prompt: "REPLY pong from d",
+      notifyOnFinish: false,
+    });
+
+    const received = await waitFor(async () =>
+      (await messages(dApi, responder)).find((text) => text.includes("REPLY pong from d")),
+    );
+    expect(received).toContain(`[paseo-mesh] Message from agent ${parent} on host`);
+    expect(received).toContain(`host "${a.serverId}" and agentId "${parent}"`);
+
+    const reply = await waitForNotification(parent, `Message from agent ${responder}`);
+    expect(reply).toContain(d.serverId);
+    expect(reply).toContain("pong from d");
+    expect(reply).toContain(`host "${d.serverId}" and agentId "${responder}"`);
+  });
+
+  it("sends the bare prompt when includeSender is false", async () => {
+    await addPeer("d", d.endpoint);
+    await waitStatus("d", "online");
+    const dApi = await d.api();
+    const target = await createEchoAgent(dApi, { cwd: workB, title: "bare-d", prompt: "ready" });
+    const client = await mcp();
+    await callTool(client, "mesh_send_prompt", {
+      host: "d",
+      agentId: target,
+      prompt: "plain text",
+      includeSender: false,
+      notifyOnFinish: false,
+    });
+    const all = await waitFor(async () => {
+      const list = await messages(dApi, target);
+      return list.includes("plain text") ? list : null;
+    });
+    expect(all).toContain("Echo: plain text");
+  });
+
+  it("tells agents to ask the user instead of improvising when a host is unknown", async () => {
+    const client = await mcp();
+    const error = await callToolError(client, "mesh_get_agent", {
+      host: "devbox-cn",
+      agentId: "x",
+    });
+    expect(error).toMatch(/Unknown host "devbox-cn"/);
+    expect(error).toMatch(/ask them to add it as a mesh peer/);
+    expect(error).toMatch(/Do not try to reach it another way/);
+    const hosts = await callTool<{ guidance: string }>(client, "mesh_list_hosts", {});
+    expect(hosts.guidance).toMatch(/Pair device/);
+  });
+});
+
 describe("distribution", () => {
   it("installs from a Git source with its declared preparation step", async () => {
     const g = await TestDaemon.start({ name: "git", plugins: [] });

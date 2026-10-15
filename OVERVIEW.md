@@ -1,4 +1,4 @@
-Paseo Mesh lets agents on this host see and drive agents on your other Paseo hosts. An agent can list the agents on another machine, read their timelines, start new agents there, send follow-ups, answer their permission requests, and get a message when they finish, error or need permission.
+Paseo Mesh lets agents on this host see and drive agents on your other Paseo hosts. An agent can list the agents on another machine, read their timelines, start new agents there, send follow-ups, answer their permission requests, and get a message when they finish, error or need permission. Messages carry the sending agent and a reply address, so agents on two hosts that both run mesh can talk to each other.
 
 ## How it works
 
@@ -6,7 +6,7 @@ New agents on this host get a `mesh` MCP server served by the plugin on 127.0.0.
 
 ## Setup
 
-Get a pairing offer on each machine you want to reach with `paseo daemon pair`, then add it under Settings, Plugins, mesh, Peers. Direct `host:port` connections work on Tailscale or a LAN; set a daemon password on the peer and enter it here.
+Mesh keeps its own list of peers; hosts you added to the app are not reachable by agents until you add them here. Copy each machine's pairing link from Settings, that host, Pair device in the app (or run `paseo daemon pair` on it), then add it under Settings, Plugins, mesh, Peers. The Peers screen lists the app's hosts that mesh cannot reach yet. Direct `host:port` connections work on Tailscale or a LAN; set a daemon password on the peer and enter it here.
 
 Each peer is read-only by default. Grant write access to let agents create and control agents there, and add allowed paths to keep them in specific directories. Open Mesh in the sidebar to see every host and its agents.
 

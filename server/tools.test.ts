@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { condenseItem, isAbsolutePath, isWithin, normalizeRemotePath, truncate } from "./tools";
+import {
+  condenseItem,
+  isAbsolutePath,
+  isWithin,
+  normalizeRemotePath,
+  senderHeader,
+  truncate,
+} from "./tools";
 
 describe("normalizeRemotePath", () => {
   it("resolves dot segments and duplicate separators", () => {
@@ -77,5 +84,30 @@ describe("condenseItem", () => {
 describe("truncate", () => {
   it("leaves short text alone", () => {
     expect(truncate("short", 10)).toBe("short");
+  });
+});
+
+describe("senderHeader", () => {
+  const sender = { agentId: "agent-1", serverId: "srv_A", hostname: "laptop" };
+
+  it("names the sender and the reply address, which uses the stable serverId", () => {
+    const header = senderHeader({ ...sender, notifyOnFinish: false });
+    expect(header).toBe(
+      '[paseo-mesh] Message from agent agent-1 on host laptop, srv_A.\nTo reply, call mesh_send_prompt with host "srv_A" and agentId "agent-1".',
+    );
+  });
+
+  it("tells the receiver its final response already reaches a notified sender", () => {
+    expect(senderHeader({ ...sender, notifyOnFinish: true })).toContain(
+      "The sender receives your final response when this turn ends",
+    );
+  });
+
+  it("offers no reply address when the sender is not an agent", () => {
+    const header = senderHeader({ ...sender, agentId: null, notifyOnFinish: false });
+    expect(header).toBe(
+      "[paseo-mesh] Message from laptop, srv_A. The sender is not an agent you can reply to.",
+    );
+    expect(header).not.toContain("mesh_send_prompt");
   });
 });
