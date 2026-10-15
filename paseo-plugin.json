@@ -1,0 +1,9 @@
+{
+  "id": "mesh",
+  "name": "Paseo Mesh",
+  "description": "Cross-host agent orchestration: list, read, create and message agents on other Paseo daemons.",
+  "requirements": {
+    "paseo": ">=0.11.0"
+  },
+  "build": [["npm", "ci", "--omit=dev", "--ignore-scripts"]]
+}
