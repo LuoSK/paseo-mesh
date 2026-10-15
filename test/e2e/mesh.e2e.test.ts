@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -110,6 +110,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await Promise.all([a?.destroy(), b?.destroy(), c?.destroy()]);
+  await Promise.all([workA, workB].map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 describe("injection", () => {
@@ -141,7 +142,7 @@ describe("injection", () => {
       prompt: "MCP mesh mesh_list_hosts {}",
     });
     const all = await messages(api, id);
-    expect(all.at(-1)).toContain('"serverId": "' + a.serverId + '"');
+    expect(all.at(-1)).toContain(`"serverId": "${a.serverId}"`);
   });
 });
 
