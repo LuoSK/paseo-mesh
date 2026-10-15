@@ -1,0 +1,32 @@
+name: Paseo compatibility
+
+# Runs the suite against the newest published Paseo packages so upstream changes
+# surface here before users hit them.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  latest-paseo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Use the latest Paseo packages
+        run: npm install --no-save @getpaseo/cli@latest @getpaseo/plugin@latest @getpaseo/client@latest @getpaseo/protocol@latest
+      - run: npx paseo --version
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:e2e
+        env:
+          MESH_E2E_RELAY: "1"
