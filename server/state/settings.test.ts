@@ -84,10 +84,12 @@ describe("MeshSettings", () => {
     await settings.update({ appSync: { enabled: true } });
     await sync();
     const id = settings.current.peers[0].id;
+    expect(settings.current.peers[0].allowExec).toBe(false);
     await settings.updatePeer({
       id,
       name: "builder",
       access: "write",
+      allowExec: true,
       allowedPaths: ["/srv/work"],
     });
     await settings.addPeer({
@@ -108,6 +110,7 @@ describe("MeshSettings", () => {
           id,
           name: "builder",
           access: "write",
+          allowExec: true,
           allowedPaths: ["/srv/work"],
           connection: "new-build:6767",
           password: "new-secret",

@@ -24,12 +24,16 @@ Commands:
 
 Peer options:
   --write | --read                    Access level (default for add: read)
+  --allow-exec | --no-exec            Enable or disable shell execution (default: disabled)
   --password-stdin                    Read the peer's daemon password from stdin
   --clear-password                    Remove a stored password (set only)
   --allow <path>                      Allowed absolute path on that host (repeatable)
   --name <name>                       New name (set only)
   --connection <connection>           New connection (set only)
   --enable | --disable                Turn the peer on or off (set only)
+
+Settings options:
+  --local-allow-exec | --local-no-exec  Enable or disable local shell execution
 
 Target daemon:
   --home <path>                       Local daemon home (default: $PASEO_HOME or ~/.paseo)
@@ -49,6 +53,10 @@ async function main(argv) {
       json: { type: "boolean", default: false },
       write: { type: "boolean" },
       read: { type: "boolean" },
+      "allow-exec": { type: "boolean" },
+      "no-exec": { type: "boolean" },
+      "local-allow-exec": { type: "boolean" },
+      "local-no-exec": { type: "boolean" },
       "password-stdin": { type: "boolean" },
       "clear-password": { type: "boolean" },
       allow: { type: "string", multiple: true },
@@ -91,6 +99,11 @@ async function main(argv) {
       const result = await rpc("mesh.settings.update", {
         ...(Object.keys(injection).length ? { injection } : {}),
         ...(localAccess ? { localAccess } : {}),
+        ...(values["local-allow-exec"]
+          ? { localAllowExec: true }
+          : values["local-no-exec"]
+            ? { localAllowExec: false }
+            : {}),
       });
       print(values.json, result, (value) => JSON.stringify(value, null, 2));
       return 0;
@@ -106,6 +119,7 @@ async function main(argv) {
         connection,
         ...(password ? { password } : {}),
         access: values.write ? "write" : "read",
+        allowExec: values["allow-exec"] ?? false,
         allowedPaths: values.allow ?? [],
       });
       print(values.json, peer, (value) => `Added ${value.name} (${value.id}): ${value.status}`);
@@ -132,6 +146,11 @@ async function main(argv) {
         ...(values.name ? { name: values.name } : {}),
         ...(values.connection ? { connection: values.connection } : {}),
         ...(values.write ? { access: "write" } : values.read ? { access: "read" } : {}),
+        ...(values["allow-exec"]
+          ? { allowExec: true }
+          : values["no-exec"]
+            ? { allowExec: false }
+            : {}),
         ...(values.allow ? { allowedPaths: values.allow } : {}),
         ...(values.enable ? { enabled: true } : values.disable ? { enabled: false } : {}),
         ...(values["clear-password"] ? { password: null } : password ? { password } : {}),

@@ -2,6 +2,12 @@ import type { PaseoApi } from "@getpaseo/client";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { HostStatus, PeerConfig, PeerSummary } from "../../shared/config";
 
+export type TerminalDaemon = Pick<DaemonClient, "observeTerminal" | "subscribeConnectionStatus">;
+export interface TerminalSession {
+  api: PaseoApi;
+  daemon: TerminalDaemon;
+}
+
 export interface ServerIdentity {
   serverId: string;
   hostname: string | null;
@@ -23,7 +29,7 @@ export interface Peer {
   summary(): PeerSummary;
   session(timeoutMs: number): Promise<{
     api: PaseoApi;
-    daemon: Pick<DaemonClient, "waitForFinish" | "cancelAgent">;
+    daemon: Pick<DaemonClient, "waitForFinish" | "cancelAgent"> & TerminalDaemon;
   }>;
 }
 

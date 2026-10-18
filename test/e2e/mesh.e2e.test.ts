@@ -1195,6 +1195,17 @@ describe("paseo-mesh CLI", () => {
       allowedPaths: ["/srv/work"],
     });
 
+    await meshCli(["peers", "set", "cli-c2", "--write", "--allow-exec"]);
+    expect(await host("cli-c2")).toMatchObject({ access: "write", allowExec: true });
+    await meshCli(["peers", "set", "cli-c2", "--no-exec"]);
+    expect(await host("cli-c2")).toMatchObject({ allowExec: false });
+    expect(JSON.parse(await meshCli(["settings", "--local-allow-exec", "--json"]))).toMatchObject({
+      localAllowExec: true,
+    });
+    expect(JSON.parse(await meshCli(["settings", "--local-no-exec", "--json"]))).toMatchObject({
+      localAllowExec: false,
+    });
+
     await meshCli(["peers", "remove", added.id]);
     expect(await host("cli-c2")).toBeUndefined();
     await expect(meshCli(["peers", "remove", "nope"])).rejects.toThrow(/Unknown peer "nope"/);

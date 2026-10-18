@@ -8,7 +8,7 @@ New agents on this host get a `mesh` MCP server served by the plugin on 127.0.0.
 
 Agents reach only the hosts in mesh's peer list. Under Settings, Plugins, mesh, Peers, turn on Keep peers in step with this app's hosts to sync that list with the app's Hosts while the desktop or web app is open, including on headless servers you reach from the app. You can also add peers by hand: a machine's pairing link from Settings, that host, Pair device (or `paseo daemon pair` on it), a `host:port` on Tailscale or a LAN with the daemon password, or an `ssh://user@host` address that uses the daemon user's SSH keys.
 
-Each peer is read-only by default. Grant write access to let agents create and control agents there, and add allowed paths to keep them in specific directories. Open Mesh in the sidebar to see every host and its agents.
+Each peer is read-only by default. Grant write access to let agents create and control agents there, and add allowed paths to keep them in specific directories. Enable Allow shell execution separately to use `mesh_exec` on a POSIX host: it returns combined output and an exit code in one call and cleans up its temporary terminal. Scripts run as the daemon user; allowed paths restrict only their initial working directory. Open Mesh in the sidebar to see every host and its agents.
 
 Requires Paseo 0.11.0 or newer on this host.
 

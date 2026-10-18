@@ -11,6 +11,7 @@ const local: LocalHost = {
   id: "local",
   name: "local",
   access: "write",
+  allowExec: false,
   allowedPaths: [],
   serverId: "srv_LOCAL",
 };

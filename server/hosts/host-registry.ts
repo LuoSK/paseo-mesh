@@ -7,13 +7,20 @@ import {
   type PeerSummary,
 } from "../../shared/config";
 import type { Logger } from "../logger";
-import { type Peer, type PeerLifecycle, PeerUnavailableError, type ServerIdentity } from "./peer";
+import {
+  type Peer,
+  type PeerLifecycle,
+  PeerUnavailableError,
+  type ServerIdentity,
+  type TerminalSession,
+} from "./peer";
 
 export interface LocalHost {
   readonly kind: "local";
   readonly id: "local";
   readonly name: typeof LOCAL_HOST_NAME;
   readonly access: MeshConfig["localAccess"];
+  readonly allowExec: boolean;
   readonly allowedPaths: readonly string[];
   readonly serverId: string | null;
 }
@@ -38,6 +45,7 @@ export interface HostRegistryOptions {
   logger: Logger;
   createPeer(config: PeerConfig, lifecycle: PeerLifecycle): Peer;
   localApi(): Promise<PaseoApi>;
+  localTerminalSession?(): Promise<TerminalSession>;
   localServerId(): string | null;
   localHostname(): string | null;
   localVersion(): string | null;
@@ -153,6 +161,7 @@ export class HostRegistry {
       id: "local",
       name: LOCAL_HOST_NAME,
       access: this.config.localAccess,
+      allowExec: this.config.localAllowExec,
       allowedPaths: [],
       serverId: this.options.localServerId(),
     };
@@ -160,6 +169,12 @@ export class HostRegistry {
 
   async api(host: HostRef, timeoutMs: number): Promise<PaseoApi> {
     return (await this.ops(host, timeoutMs)).api;
+  }
+
+  async terminalSession(host: HostRef, timeoutMs: number): Promise<TerminalSession> {
+    if (host.kind === "remote") return host.peer.session(timeoutMs);
+    if (!this.options.localTerminalSession) throw new Error("Local terminal session unavailable");
+    return this.options.localTerminalSession();
   }
 
   /** Uniform operations across this daemon and remote peers. */
@@ -196,6 +211,7 @@ export class HostRegistry {
       kind: "local",
       endpoint: "this daemon",
       access: this.config.localAccess,
+      allowExec: this.config.localAllowExec,
       allowedPaths: [],
       enabled: true,
       hasPassword: false,

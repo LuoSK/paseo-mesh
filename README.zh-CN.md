@@ -23,6 +23,7 @@ Paseo 自带的编排能力（`create_agent`、`send_agent_prompt`、完成通�
 
 - **给 agent 的 mesh 工具。** 安装后新建的 agent 会带上 `mesh` MCP server，包含 `mesh_list_hosts`、`mesh_list_workspaces`、`mesh_list_agents`、`mesh_get_agent`、`mesh_read_timeline`、`mesh_list_providers`、`mesh_create_agent`、`mesh_send_prompt`、`mesh_wait_agent`、`mesh_respond_permission`、`mesh_stop_agent`、`mesh_archive_agent`。
 - **跨 host 完成通知。** agent 在远端创建或指挥的 agent 完成、出错或请求权限时，会收到一条消息，格式和 Paseo 自己的通知一致。
+- **直接执行脚本。** `mesh_exec` 在 POSIX host 上执行 shell 脚本，一次调用返回合并后的输出和退出码，执行结束后自动清理临时终端。
 - **支持 Paseo 的所有连接方式。** 配对 offer URL 和 `relay://` URI（经 Paseo relay 端到端加密，不用开端口），或者直连 `host:port` / `ws://` / `wss://`，可带 daemon 密码（Tailscale、局域网、反向代理）。
 - **按 host 控制权限。** 每个 peer 可以设为只读或读写，还可以限制允许的路径。
 - **App 界面。** 侧边栏的 Mesh 页面显示各 host 状态和所有 agent；Peers 设置页用来增删改 peer。
@@ -142,6 +143,14 @@ To reply, call mesh_send_prompt with host "srv_…" and agentId "3f2c…".
 
 工具列表、权限要求和配置项见[英文 README](README.md#tools)。
 
+直接运行脚本时，先为目标 peer 授予读写权限，并在 Mesh 设置中开启 **Allow shell execution**，或运行 `paseo-mesh peers set gpu-box --write --allow-exec`。然后调用 `mesh_exec`：
+
+```json
+{"host":"gpu-box","cwd":"/srv/project","script":"bash scripts/check.sh","timeoutSeconds":50}
+```
+
+调用会等待执行结束，返回 `output`（合并的 stdout 和 stderr）、`exitCode`、`timedOut`、`truncated`、`error` 和 `cleanupPending`。输出保留 UTF-8 文本、换行和 ANSI 序列。`shell` 默认 `/bin/sh`，`maxOutputChars` 默认 200,000，最多 2,000,000；超时默认 50 秒，最多 600 秒，包含准备时间，应小于 MCP 客户端的工具超时。脚本的 stdin 关闭。超时或连接失败时返回已收集的输出和错误，脚本不会自动重试。完成、超时、取消和插件关闭时都会清理临时终端；断线或插件意外退出后，远端存活时限会终止终端，重连和重载也会清理残留。`cleanupPending` 表示尚未确认远端清理完成。本机执行需开启 `localAllowExec`，或运行 `paseo-mesh settings --local-allow-exec`。
+
 ## host 变化时的行为
 
 | 事件 | 行为 |
@@ -161,6 +170,7 @@ To reply, call mesh_send_prompt with host "srv_…" and agentId "3f2c…".
 ## 安全
 
 - **信任边界。** 配对 offer 或 daemon 密码等于那台 daemon 的完全控制权。Paseo 目前还不能签发受限凭据，所以读写权限和允许路径由 mesh 自己执行。它们是给 agent 的护栏，不是沙箱：peer 上的符号链接不会被解析。
+- **脚本执行**默认关闭，同步来的 peer 也一样。开启 `allowExec` 后仍需读写权限，`localAllowExec` 控制本机执行。脚本以目标 daemon 用户运行，允许路径仅限制初始工作目录，不限制后续文件访问和命令。目标需为有 `/bin/sh`、`stty` 且支持 workspace terminal 的 POSIX host。
 - **App 主机同步**在 App 内部读取 Paseo 保存的主机列表（超出插件 API 的范围），并把 relay 密钥、地址和密码复制到运行 mesh 的 daemon 上。默认关闭。
 - **机密只留在本机。** offer 和密码保存在 `$PASEO_HOME/paseo-mesh/config.json`（权限 0600），RPC 和状态页面都不会返回它们。
 - **本地端点。** MCP server 只监听 `127.0.0.1`，使用随机 bearer token，保存在 `$PASEO_HOME/paseo-mesh/server.json`（0600）。这个 token 会注入到 agent 的 MCP 配置里，Paseo 把它保存在 agent 记录中。

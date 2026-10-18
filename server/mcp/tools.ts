@@ -19,6 +19,7 @@ import {
   hostLabel,
   hostServerId,
 } from "../hosts/host-registry";
+import type { ShellRunner } from "../shell";
 import type { McpCaller, McpTool, McpToolResult } from "./http";
 
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -30,6 +31,7 @@ export interface ToolContext {
     "resolve" | "localHost" | "remotePeers" | "api" | "ops" | "summaries"
   >;
   watches: Pick<WatchManager, "add">;
+  shell: Pick<ShellRunner, "execute">;
   /** Resolves the calling agent from the MCP URL's caller nonce. */
   resolveCaller(caller: McpCaller): string | null;
   localServerId(): string | null;
@@ -50,6 +52,37 @@ const agentIdParam = z
 const statusSchema = z.enum(["initializing", "idle", "running", "error", "closed"]);
 
 const schemas = {
+  exec: z.object({
+    host: hostParam,
+    cwd: z.string().min(1).describe("Absolute working directory on the target host."),
+    script: z
+      .string()
+      .min(1)
+      .max(100_000)
+      .refine((value) => !value.includes("\0"), "Script cannot contain NUL")
+      .describe("Shell script to execute directly, without an AI agent. stdin is closed."),
+    shell: z
+      .string()
+      .min(1)
+      .default("/bin/sh")
+      .describe("Shell executable on the POSIX target host, e.g. /bin/bash."),
+    timeoutSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(600)
+      .default(50)
+      .describe("Execution deadline, including setup. Keep below the MCP client's tool timeout."),
+    maxOutputChars: z
+      .number()
+      .int()
+      .min(1)
+      .max(2_000_000)
+      .default(200_000)
+      .describe(
+        "Maximum returned output characters; excess output is drained and marked truncated.",
+      ),
+  }),
   listHosts: z.object({}),
   listWorkspaces: z.object({
     host: hostParam,
@@ -163,6 +196,7 @@ const schemas = {
 };
 
 export const WRITE_TOOL_NAMES = [
+  "mesh_exec",
   "mesh_create_agent",
   "mesh_send_prompt",
   "mesh_stop_agent",
@@ -196,6 +230,31 @@ export function createMeshTools(context: ToolContext): McpTool[] {
 
   return [
     tool({
+      name: "mesh_exec",
+      title: "Execute a shell script on a host",
+      description:
+        "Execute a shell script directly on a POSIX mesh host and wait for its output and exit code. Requires write access and Allow shell execution for that host. Returns combined stdout/stderr, timeout and truncation status. The temporary terminal is cleaned up automatically. Scripts receive no stdin. The allowed path restricts the initial cwd, not the script's filesystem access.",
+      schema: schemas.exec,
+      readOnly: false,
+      destructive: true,
+      async run(input, _caller, signal) {
+        const host = registry.resolve(input.host);
+        requireWrite(host);
+        requireAllowedPath(host, input.cwd);
+        const allowed = host.kind === "local" ? host.allowExec : host.peer.peerConfig.allowExec;
+        if (!allowed)
+          throw new Error(
+            `Shell execution is disabled on host ${hostLabel(host)}. Enable Allow shell execution in the mesh settings for this host.`,
+          );
+        const result = await context.shell.execute(host, input, signal);
+        return {
+          host: hostLabel(host),
+          serverId: hostServerId(host),
+          ...result,
+        };
+      },
+    }),
+    tool({
       name: "mesh_list_hosts",
       title: "List mesh hosts",
       description:
@@ -209,6 +268,7 @@ export function createMeshTools(context: ToolContext): McpTool[] {
             id: summary.id,
             status: summary.status,
             access: summary.access,
+            allowExec: summary.allowExec,
             serverId: summary.serverId,
             hostname: summary.hostname,
             version: summary.version,
@@ -705,7 +765,7 @@ interface ToolSpec<Schema extends z.ZodType> {
   schema: Schema;
   readOnly: boolean;
   destructive?: boolean;
-  run(input: z.output<Schema>, caller: McpCaller): Promise<unknown>;
+  run(input: z.output<Schema>, caller: McpCaller, signal: AbortSignal): Promise<unknown>;
 }
 
 function tool<Schema extends z.ZodType>(spec: ToolSpec<Schema>): McpTool {
@@ -725,7 +785,7 @@ function tool<Schema extends z.ZodType>(spec: ToolSpec<Schema>): McpTool {
       destructiveHint: spec.destructive ?? false,
       openWorldHint: true,
     },
-    async call(args, { caller }): Promise<McpToolResult> {
+    async call(args, { caller, signal }): Promise<McpToolResult> {
       const parsed = spec.schema.safeParse(args ?? {});
       if (!parsed.success) {
         return {
@@ -733,7 +793,7 @@ function tool<Schema extends z.ZodType>(spec: ToolSpec<Schema>): McpTool {
           isError: true,
         };
       }
-      const result = await spec.run(parsed.data, caller);
+      const result = await spec.run(parsed.data, caller, signal);
       const structured = JSON.parse(JSON.stringify(result ?? {})) as Record<string, unknown>;
       return {
         content: [{ type: "text", text: JSON.stringify(structured, null, 2) }],

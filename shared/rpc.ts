@@ -19,6 +19,7 @@ export const meshStatusRpc = defineRpc({
     version: z.string(),
     hosts: z.array(peerSummarySchema),
     localAccess: accessLevelSchema,
+    localAllowExec: z.boolean(),
     injection: injectionConfigSchema,
     appSync: appSyncConfigSchema.extend({
       excluded: z.array(z.string()),
@@ -47,6 +48,7 @@ export const addPeerRpc = defineRpc({
     connection: z.string().trim().min(1),
     password: z.string().optional(),
     access: accessLevelSchema.default("read"),
+    allowExec: z.boolean().default(false),
     allowedPaths: z.array(z.string().trim().min(1)).default([]),
   }),
   output: peerSummarySchema,
@@ -61,6 +63,7 @@ export const updatePeerRpc = defineRpc({
     /** A string replaces the password, null clears it, omitted keeps it. */
     password: z.string().nullable().optional(),
     access: accessLevelSchema.optional(),
+    allowExec: z.boolean().optional(),
     allowedPaths: z.array(z.string().trim().min(1)).optional(),
     enabled: z.boolean().optional(),
   }),
@@ -83,6 +86,7 @@ export const updateSettingsRpc = defineRpc({
   name: "mesh.settings.update",
   input: z.object({
     localAccess: accessLevelSchema.optional(),
+    localAllowExec: z.boolean().optional(),
     injection: injectionPatchSchema.optional(),
     appSync: z
       .object({
@@ -92,7 +96,11 @@ export const updateSettingsRpc = defineRpc({
       })
       .optional(),
   }),
-  output: z.object({ localAccess: accessLevelSchema, injection: injectionConfigSchema }),
+  output: z.object({
+    localAccess: accessLevelSchema,
+    localAllowExec: z.boolean(),
+    injection: injectionConfigSchema,
+  }),
 });
 
 /** This daemon's identity and pairing offer, for other hosts' syncs. */

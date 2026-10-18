@@ -64,8 +64,9 @@ export async function startMcpHttpServer(
   listen: { host: string; port: number },
 ): Promise<McpHttpServer> {
   const sockets = new Set<import("node:net").Socket>();
+  const requests = new Map<string, AbortController>();
   const server: Server = createServer((req, res) => {
-    void handleHttp(options, req, res).catch((error: unknown) => {
+    void handleHttp(options, req, res, requests).catch((error: unknown) => {
       options.onError?.(error);
       if (!res.headersSent) sendJson(res, 500, rpcError(null, -32603, "Internal error"));
       else res.end();
@@ -87,6 +88,7 @@ export async function startMcpHttpServer(
     port,
     url: `http://${listen.host}:${port}/mcp`,
     async close() {
+      for (const request of requests.values()) request.abort();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
         for (const socket of sockets) socket.destroy();
@@ -99,6 +101,7 @@ async function handleHttp(
   options: McpHttpServerOptions,
   req: IncomingMessage,
   res: ServerResponse,
+  requests: Map<string, AbortController>,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (url.pathname === "/health" && req.method === "GET") {
@@ -139,7 +142,22 @@ async function handleHttp(
   const messages = Array.isArray(body) ? body : [body];
   const responses: JsonRpcResponse[] = [];
   for (const message of messages) {
-    const response = await handleMessage(options, message, caller, abort.signal);
+    if (
+      isRequest(message) &&
+      message.method === "notifications/cancelled" &&
+      isObject(message.params)
+    ) {
+      requests.get(requestKey(caller, message.params.requestId))?.abort();
+      continue;
+    }
+    const key = isRequest(message) ? requestKey(caller, message.id) : "";
+    if (isRequest(message) && message.method === "tools/call") requests.set(key, abort);
+    let response: JsonRpcResponse | null;
+    try {
+      response = await handleMessage(options, message, caller, abort.signal);
+    } finally {
+      if (requests.get(key) === abort) requests.delete(key);
+    }
     if (response) responses.push(response);
   }
   if (responses.length === 0) {
@@ -147,6 +165,10 @@ async function handleHttp(
     return;
   }
   sendJson(res, 200, Array.isArray(body) ? responses : responses[0]);
+}
+
+function requestKey(caller: McpCaller, id: unknown): string {
+  return JSON.stringify([caller.nonce, typeof id, id]);
 }
 
 async function handleMessage(

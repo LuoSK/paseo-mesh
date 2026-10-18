@@ -38,7 +38,8 @@ export const peerConfigSchema = z.object({
   origin: z.string().optional(),
   password: z.string().optional(),
   access: accessLevelSchema.default("read"),
-  /** Absolute path prefixes on the peer where mesh may create agents. Empty means anywhere. */
+  allowExec: z.boolean().default(false),
+  /** Allowed agent directories and shell starting directories. Empty means anywhere. */
   allowedPaths: z.array(z.string().trim().min(1)).default([]),
   enabled: z.boolean().default(true),
 });
@@ -83,6 +84,7 @@ export const meshConfigSchema = z
     peers: z.array(peerConfigSchema).default([]),
     /** Access granted to the orchestrating host itself through the `local` name. */
     localAccess: accessLevelSchema.default("write"),
+    localAllowExec: z.boolean().default(false),
     injection: injectionConfigSchema.default(injectionConfigSchema.parse({})),
     appSync: appSyncConfigSchema.default(appSyncConfigSchema.parse({})),
   })
@@ -121,6 +123,7 @@ export const peerSummarySchema = z.object({
   kind: z.enum(["local", "relay", "direct", "ssh"]),
   endpoint: z.string(),
   access: accessLevelSchema,
+  allowExec: z.boolean(),
   allowedPaths: z.array(z.string()),
   enabled: z.boolean(),
   hasPassword: z.boolean(),

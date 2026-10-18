@@ -17,6 +17,7 @@ paseo-mesh is one Paseo plugin with a server entry (runs in the plugin subproces
 | `server/hosts/local-connection.ts` | Reaching the plugin's own daemon outside hook and RPC calls |
 | `server/mcp/http.ts` | Minimal MCP server over Streamable HTTP |
 | `server/mcp/tools.ts` | The `mesh_*` tools |
+| `server/shell.ts` | Bounded script output, exit framing, execution deadlines and temporary terminal cleanup |
 | `server/agents/watches.ts` | Persisted finish notifications for remote work |
 | `server/mcp/callers.ts` | Mapping MCP callers to local agent IDs |
 | `server/state/json-store.ts` | `StateStore` contract and atomic, owner-only JSON files with external-edit watching |
@@ -84,6 +85,8 @@ The client's own reconnect is disabled. On any disconnect the connection is torn
 A generation counter discards results of connects that were superseded by a config change or close, and a closed peer never restarts. Duplicate detection compares against peers that are online or have just claimed a server ID: validation and the claim happen without an `await` in between, so of two peers reaching the same daemon at the same moment, exactly one wins.
 
 Config is applied as a diff keyed by the stable peer `id`. Name, access and allowed-path changes are applied in place. Connection, password and enablement changes reconnect.
+
+`mesh_exec` uses the same peer session to create a workspace terminal and observe raw PTY bytes. A gated POSIX wrapper starts the script only after observation attaches, frames its exit code, waits for result acknowledgement, and terminates its process group on exit. Output collection is bounded and continues draining after truncation. Every execution attempts acknowledged terminal teardown in `finally`; cancellation and plugin shutdown abort active calls before connections close. A remote watchdog bounds orphan lifetime to the requested timeout plus ten seconds. Terminals carry an installation-specific name prefix so reconnect and reload can reap abandoned executions without touching active calls or user terminals. Executions are never replayed after a disconnect.
 
 ## The local daemon
 

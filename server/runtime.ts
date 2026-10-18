@@ -28,6 +28,7 @@ import { consoleLogger, type Logger } from "./logger";
 import { CALLER_ENV, CallerRegistry, callerFileSchema } from "./mcp/callers";
 import { type McpHttpServer, startMcpHttpServer } from "./mcp/http";
 import { createMeshTools, READ_ONLY_TOOL_NAMES } from "./mcp/tools";
+import { ShellRunner } from "./shell";
 import { JsonFileStore } from "./state/json-store";
 import { MeshSettings } from "./state/settings";
 
@@ -61,6 +62,7 @@ export class MeshRuntime {
   private readonly callers: CallerRegistry;
   readonly registry: HostRegistry;
   readonly watches: WatchManager;
+  readonly shell: ShellRunner;
   private mcp: McpHttpServer | null = null;
   private mcpError: string | null = null;
   private token: string | null = null;
@@ -114,11 +116,20 @@ export class MeshRuntime {
           ...lifecycle,
         }),
       localApi: () => this.local.api(),
+      localTerminalSession: () => this.local.terminalSession(),
       localServerId: () => this.localServerId,
       localHostname: () => this.localHostname,
       localVersion: () => null,
-      onPeerConnected: () => this.watches.poke(),
+      onPeerConnected: (peer) => {
+        this.watches.poke();
+        void this.shell.recover({ kind: "remote", peer });
+      },
     });
+    this.shell = new ShellRunner(
+      this.registry,
+      `${this.localServerId ?? "local"}:${this.dataDirectory}`,
+      this.logger,
+    );
     this.watches = new WatchManager({
       store: new JsonFileStore(path.join(this.dataDirectory, "watches.json"), watchFileSchema, () =>
         watchFileSchema.parse({}),
@@ -176,7 +187,11 @@ export class MeshRuntime {
       this.provideLocalApi(paseo);
       await this.ready;
       const next = await this.settings.update(input);
-      return { localAccess: next.localAccess, injection: next.injection };
+      return {
+        localAccess: next.localAccess,
+        localAllowExec: next.localAllowExec,
+        injection: next.injection,
+      };
     });
     server.handle(describeSelfRpc, async (_input, { paseo }) => {
       this.provideLocalApi(paseo);
@@ -276,6 +291,7 @@ export class MeshRuntime {
         this.logger.error(`Could not load callers: ${messageOf(error)}`);
       });
       await this.settings.start();
+      void this.shell.recover(this.registry.localHost());
       await this.startMcp();
       await this.watches.start();
       this.logger.info(
@@ -298,6 +314,7 @@ export class MeshRuntime {
     this.resolveReady();
     await this.settings.close();
     await this.watches.close();
+    await this.shell.close();
     await this.registry.close();
     await this.mcp?.close();
     this.mcp = null;
@@ -308,6 +325,7 @@ export class MeshRuntime {
     return createMeshTools({
       registry: this.registry,
       watches: this.watches,
+      shell: this.shell,
       resolveCaller: (caller) => this.callers.resolve(caller),
       localServerId: () => this.localServerId,
       localHostname: () => this.localHostname,
@@ -320,6 +338,7 @@ export class MeshRuntime {
       version: MESH_VERSION,
       hosts: this.registry.summaries(),
       localAccess: this.settings.current.localAccess,
+      localAllowExec: this.settings.current.localAllowExec,
       injection: this.settings.current.injection,
       appSync: { ...this.settings.current.appSync, last: this.settings.lastSync },
       mcp: { url: this.mcp?.url ?? null, error: this.mcpError },

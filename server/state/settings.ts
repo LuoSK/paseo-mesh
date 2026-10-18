@@ -52,6 +52,7 @@ export class MeshSettings {
     return this.mutateConfig((config) => ({
       ...config,
       ...(input.localAccess ? { localAccess: input.localAccess } : {}),
+      ...(input.localAllowExec !== undefined ? { localAllowExec: input.localAllowExec } : {}),
       ...(input.injection
         ? { injection: { ...config.injection, ...definedOnly(input.injection) } }
         : {}),
@@ -72,6 +73,7 @@ export class MeshSettings {
     connection: string;
     password?: string;
     access: "read" | "write";
+    allowExec?: boolean;
     allowedPaths: string[];
   }): Promise<string> {
     parseConnectionTarget(input.connection);
@@ -86,6 +88,7 @@ export class MeshSettings {
         connection: input.connection.trim(),
         ...(input.password ? { password: input.password } : {}),
         access: input.access,
+        allowExec: input.allowExec ?? false,
         allowedPaths: input.allowedPaths,
         enabled: true,
       };
@@ -100,6 +103,7 @@ export class MeshSettings {
     connection?: string;
     password?: string | null;
     access?: "read" | "write";
+    allowExec?: boolean;
     allowedPaths?: string[];
     enabled?: boolean;
   }): Promise<string> {
@@ -118,6 +122,7 @@ export class MeshSettings {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.connection !== undefined ? { connection: input.connection.trim() } : {}),
         ...(input.access !== undefined ? { access: input.access } : {}),
+        ...(input.allowExec !== undefined ? { allowExec: input.allowExec } : {}),
         ...(input.allowedPaths !== undefined ? { allowedPaths: input.allowedPaths } : {}),
         ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
       };
@@ -209,6 +214,7 @@ export class MeshSettings {
           serverId: host.serverId,
           origin,
           access: config.appSync.access,
+          allowExec: false,
           allowedPaths: [],
           enabled: true,
         });

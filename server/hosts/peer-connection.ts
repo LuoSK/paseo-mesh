@@ -181,6 +181,7 @@ export class PeerConnection implements Peer {
       kind: this.target?.kind ?? "direct",
       endpoint: this.target ? describeConnection(this.target) : "invalid connection",
       access: this.config.access,
+      allowExec: this.config.allowExec,
       allowedPaths: this.config.allowedPaths,
       enabled: this.config.enabled,
       hasPassword: Boolean(this.config.password),

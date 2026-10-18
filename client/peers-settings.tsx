@@ -94,6 +94,7 @@ export function PeersSettings({ theme }: PluginSurfaceProps) {
       <AddPeer key={prefill.key} initialName={prefill.name} />
       <AgentAccess
         localAccess={status.data.localAccess}
+        localAllowExec={status.data.localAllowExec}
         injection={status.data.injection}
         mcpUrl={status.data.mcp.url}
         dataDirectory={status.data.dataDirectory}
@@ -150,6 +151,13 @@ function PeerCard({ peer, theme }: { peer: PeerSummary; theme: PluginSurfaceProp
         options={ACCESS_OPTIONS}
         disabled={busy}
         onValueChange={(access) => mutation.mutate(() => update({ id: peer.id, access }))}
+      />
+      <SettingsSwitch
+        label="Allow shell execution"
+        hint="Requires write access. Scripts run as the daemon user; allowed paths restrict only the starting directory."
+        value={peer.allowExec}
+        disabled={busy}
+        onValueChange={(allowExec) => mutation.mutate(() => update({ id: peer.id, allowExec }))}
       />
       <SettingsSwitch
         label="Enabled"
@@ -454,12 +462,14 @@ function AddPeer({ initialName }: { initialName: string }) {
 
 function AgentAccess({
   localAccess,
+  localAllowExec,
   injection,
   mcpUrl,
   dataDirectory,
   theme,
 }: {
   localAccess: AccessLevel;
+  localAllowExec: boolean;
   injection: {
     enabled: boolean;
     preapproveReadOnlyTools: boolean;
@@ -505,6 +515,13 @@ function AgentAccess({
           options={ACCESS_OPTIONS}
           disabled={mutation.isPending}
           onValueChange={(value) => mutation.mutate({ localAccess: value })}
+        />
+        <SettingsSwitch
+          label="Allow shell execution on this host"
+          hint="Requires write access. Scripts run as the daemon user."
+          value={localAllowExec}
+          disabled={mutation.isPending}
+          onValueChange={(localAllowExec) => mutation.mutate({ localAllowExec })}
         />
         <SettingsRow label="MCP endpoint">
           <Text style={muted}>{mcpUrl ?? "not running"}</Text>

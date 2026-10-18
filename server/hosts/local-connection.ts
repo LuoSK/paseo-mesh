@@ -5,6 +5,7 @@ import { createPaseoApi } from "@getpaseo/client";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { messageOf } from "../errors";
 import type { Logger } from "../logger";
+import type { TerminalSession } from "./peer";
 
 /**
  * The plugin's view of its own daemon.
@@ -38,6 +39,11 @@ export class LocalConnection {
     if (this.closed) throw new Error("paseo-mesh is stopping");
     if (this.provided) return this.provided;
     return (await this.ownConnection()).api;
+  }
+
+  async terminalSession(): Promise<TerminalSession> {
+    const { api, client } = await this.ownConnection();
+    return { api, daemon: client };
   }
 
   /**

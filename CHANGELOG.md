@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-19
+
+### Added
+
+- `mesh_exec` runs shell scripts directly on POSIX hosts and returns combined stdout/stderr, the exit code, captured output on timeout, and output truncation status in one call. Supports local execution and peers over direct connections, SSH tunnels and encrypted Relay.
+- Separate shell execution opt-in for each peer and the local host, disabled by default and managed from Mesh settings or the CLI. Execution also requires write access; allowed paths constrain the initial working directory.
+- Automatic cleanup of temporary terminals on completion, errors, timeout, cancellation and plugin shutdown, with a remote watchdog and abandoned-terminal recovery after reconnect or reload.
+- MCP cancellation notifications stop running scripts and release their temporary terminals.
+
 ## [0.1.4] - 2026-10-15
 
 ### Added
@@ -56,7 +65,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Mesh screen, Peers settings screen and Command Center entries in the Paseo app.
 - `paseo-mesh` CLI for headless peer management.
 
-[Unreleased]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/jtsang4/paseo-mesh/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/jtsang4/paseo-mesh/compare/v0.1.1...v0.1.2

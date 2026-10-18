@@ -23,6 +23,7 @@ Only the orchestrating host needs the plugin. Peers are ordinary Paseo daemons y
 
 - **Mesh tools for agents.** New agents on the host get a `mesh` MCP server with `mesh_list_hosts`, `mesh_list_workspaces`, `mesh_list_agents`, `mesh_get_agent`, `mesh_read_timeline`, `mesh_list_providers`, `mesh_create_agent`, `mesh_send_prompt`, `mesh_wait_agent`, `mesh_respond_permission`, `mesh_stop_agent` and `mesh_archive_agent`.
 - **Finish notifications across hosts.** When an agent starts or prompts a remote agent, it receives a message when that agent finishes, errors or asks for permission, in the same format as Paseo's own notifications.
+- **Direct shell execution.** `mesh_exec` runs a script on a POSIX host and returns its combined output and exit code in one call. Temporary terminals are cleaned up automatically.
 - **Any connection Paseo supports.** Pairing offer URLs and `relay://` URIs (end-to-end encrypted through the Paseo relay, no open ports), or direct `host:port` / `ws://` / `wss://` with an optional daemon password (Tailscale, LAN, reverse proxy).
 - **Per-host access control.** Each peer is read-only or read-write, optionally limited to allowed paths: agents can only create, prompt, stop, archive or answer permissions for agents under those paths.
 - **App screens.** A Mesh screen with host status and agents across hosts, and a Peers settings screen to add, edit and remove peers.
@@ -151,6 +152,7 @@ When both hosts run mesh and list each other as peers, the receiving agent can a
 | `mesh_read_timeline` | read | Recent messages and tool calls |
 | `mesh_list_providers` | read | Providers, models and modes available on a host |
 | `mesh_wait_agent` | read | Block until a turn finishes, with a timeout |
+| `mesh_exec` | write + shell opt-in | Execute a script and return combined stdout/stderr and exit code |
 | `mesh_create_agent` | write | Start an agent on a host with a first task |
 | `mesh_send_prompt` | write | Send a follow-up (steer or interrupt a running turn) |
 | `mesh_respond_permission` | write | Allow or deny a remote permission request |
@@ -158,6 +160,14 @@ When both hosts run mesh and list each other as peers, the receiving agent can a
 | `mesh_archive_agent` | write | Archive an agent on a host |
 
 Hosts are addressed by name, peer id or daemon `serverId`; `local` is the orchestrating host. Agents are identified by `(host, agentId)`. Read-only tools run without a permission prompt for Claude, Codex and OpenCode; write tools follow the agent's normal permission mode.
+
+For direct scripts, grant write access and turn on **Allow shell execution** for the peer in Mesh settings, or run `paseo-mesh peers set gpu-box --write --allow-exec`. Then call:
+
+```json
+{"host":"gpu-box","cwd":"/srv/project","script":"bash scripts/check.sh","timeoutSeconds":50}
+```
+
+`mesh_exec` waits for completion and returns `output`, `exitCode`, `timedOut`, `truncated`, `error`, and `cleanupPending`. Output combines stdout and stderr and preserves UTF-8 text, newlines and ANSI sequences. `shell` defaults to `/bin/sh`; `maxOutputChars` defaults to 200,000 (maximum 2,000,000). The deadline defaults to 50 seconds (maximum 600), including setup; keep it below your MCP client's tool timeout. Scripts receive closed stdin. Timeouts and connection failures return captured output with an error and are never retried automatically. The temporary terminal is removed on completion, timeout, cancellation and plugin shutdown. A remote watchdog bounds its lifetime if the connection or plugin disappears; abandoned terminals are also reaped on reconnect or reload. `cleanupPending` reports cleanup that could not be confirmed while the host was unreachable. For `local`, enable `localAllowExec` in settings or run `paseo-mesh settings --local-allow-exec`.
 
 ## How it behaves when hosts change
 
@@ -178,6 +188,7 @@ Hosts are addressed by name, peer id or daemon `serverId`; `local` is the orches
 ## Security
 
 - **Trust boundary.** A pairing offer or daemon password gives full control of that daemon. Paseo does not issue scoped credentials yet, so mesh enforces read/write access and allowed paths itself. They are guardrails for agents, not a sandbox: symlinks on the peer are not resolved.
+- **Shell access** is disabled by default, including for synced peers. `allowExec` requires write access; `localAllowExec` controls local execution. Scripts run as the target daemon user. Allowed paths constrain only the initial working directory, not subsequent file access or commands. Shell execution requires a POSIX host with `/bin/sh`, `stty` and workspace terminal support.
 - **App host sync** reads the Paseo app's stored host list from inside the app, beyond the plugin API, and copies relay keys, endpoints and passwords to the daemons running mesh. It is off until you turn it on.
 - **Secrets stay on the host.** Offers and passwords live in `$PASEO_HOME/paseo-mesh/config.json` (mode 0600). RPCs and the status screen never return them.
 - **Local endpoint.** The MCP server listens on `127.0.0.1` with a random bearer token stored in `$PASEO_HOME/paseo-mesh/server.json` (0600). It is injected into agents' MCP config, which Paseo keeps in the agent record.
@@ -215,6 +226,7 @@ Everything is editable in the app. The underlying file is `$PASEO_HOME/paseo-mes
 | `injection.enabled` | Give new agents the mesh MCP server |
 | `injection.excludeProviders` | Providers that cannot take MCP servers (Pi rejects them) |
 | `injection.preapproveReadOnlyTools` | Skip permission prompts for read-only mesh tools |
+| `peers[].allowExec` / `localAllowExec` | Allow direct shell execution on that host; default `false`, requires write access |
 | `injection.preapproveProviders` | Providers that support exact MCP tool preapproval |
 
 Set `PASEO_MESH_HOME` to move the data directory.
