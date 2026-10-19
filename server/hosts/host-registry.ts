@@ -57,7 +57,7 @@ export interface HostRegistryOptions {
  * driving the desktop app or copying pairing links to reach the host some other way.
  */
 export const ADD_HOST_GUIDANCE =
-  'Only the hosts listed by mesh_list_hosts are reachable. If the user means another host, stop and ask them to add it as a mesh peer: in the Paseo app open Settings → <that host> → Pair device and copy the link, then add it under Settings → Plugins → mesh → Peers (or run `npx paseo-mesh peers add <name> "<link>"` on this machine). Do not try to reach it another way, such as UI automation, the desktop app, or copying pairing links or credentials yourself.';
+  "Only the hosts listed by mesh_list_hosts are reachable. If the user means another host, stop and ask them to add it as a mesh peer: in the Paseo app open Settings → <that host> → Pair device and copy the link, then add it under Settings → Plugins → mesh → Peers. Do not try to reach it another way, such as UI automation, the desktop app, or copying pairing links or credentials yourself.";
 
 export class UnknownHostError extends Error {
   constructor(ref: string, known: readonly string[]) {
