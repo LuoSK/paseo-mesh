@@ -3,7 +3,7 @@
   "name": "Paseo Mesh",
   "description": "Cross-host agent orchestration: list, read, create and message agents on other Paseo daemons.",
   "requirements": {
-    "paseo": ">=0.11.0"
+    "paseo": ">=0.12.0"
   },
   "build": [["npm", "ci", "--omit=dev", "--ignore-scripts"]],
   "media": ["docs/images/mesh-screen.png", "docs/images/cross-host-conversation.png"]

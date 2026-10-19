@@ -16,10 +16,13 @@ Run these before every commit:
 npm run typecheck
 npm run lint        # biome; `npm run format` fixes formatting
 npm test            # unit tests
+npm run check:memory # isolated mixed-message validator memory regression
 npm run test:e2e    # real daemons, about a minute
 ```
 
 `MESH_E2E_RELAY=1 npm run test:e2e` also tests connections through `relay.paseo.sh`.
+
+The memory check forces Maglev only in a throwaway Node process, validates 12,288 small synthetic messages, and fails above 512 MiB resident growth or a 256 MiB V8 native-allocation peak. It never connects to a daemon or reads host configuration. It also accepts an installed package directory: `node scripts/check-memory.mjs /path/to/package`.
 
 ## Layout rules
 

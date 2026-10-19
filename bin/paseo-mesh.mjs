@@ -10,7 +10,7 @@ import { parseArgs } from "node:util";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 
 const PLUGIN_ID_DEFAULT = "mesh";
-const APP_VERSION = "0.11.2";
+const APP_VERSION = "0.12.0";
 
 const USAGE = `Usage: paseo-mesh <command> [options]
 

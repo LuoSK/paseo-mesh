@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## 0.2.1-blinklab.1 - 2026-10-19
+
+### Fixed
+
+- Pin Paseo client/protocol 0.12.0 and align the development CLI/plugin SDK. Per-message validators replace the old protocol-wide generated function that caused repeated Maglev compilation and high retained process memory.
+- Update the plugin and CLI client versions and require Paseo daemon/app 0.12.0 or newer.
+
+### Added
+
+- An isolated mixed-message memory regression check for both source and installed package consumers.
+
+### Changed
+
+- Maintain this fork at `LuoSK/paseo-mesh` with fork-specific versions and locked installation artifacts. The package is private to prevent npm publication; inherited GitHub workflows remain unchanged.
+
 ## [0.2.0] - 2026-10-19
 
 ### Added

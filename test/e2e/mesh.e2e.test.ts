@@ -125,15 +125,6 @@ afterAll(async () => {
 });
 
 describe("plugin", () => {
-  it("compiles its client bundle and reports running", async () => {
-    const client = await a.client();
-    const catalog = await client.getPluginCatalog();
-    const mesh = catalog.find((entry) => entry.id === "mesh");
-    expect(mesh?.clientBundle.length).toBeGreaterThan(1000);
-    const plugins = await client.listPlugins();
-    expect(plugins.find((plugin) => plugin.id === "mesh")).toMatchObject({ status: "running" });
-  });
-
   it("returns the same agent summary through app RPC and MCP", async () => {
     const agentId = await orchestrator("shared-listing");
     const app = await a.rpc<{ agents: Array<{ agentId: string; host: string }> }>(

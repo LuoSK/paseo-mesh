@@ -10,7 +10,7 @@ Agents reach only the hosts in mesh's peer list. Under Settings, Plugins, mesh, 
 
 Each peer is read-only by default. Grant write access to let agents create and control agents there, and add allowed paths to keep them in specific directories. Enable Allow shell execution separately to use `mesh_exec` on a POSIX host: it returns combined output and an exit code in one call and cleans up its temporary terminal. Scripts run as the daemon user; allowed paths restrict only their initial working directory. Open Mesh in the sidebar to see every host and its agents.
 
-Requires Paseo 0.11.0 or newer on this host.
+Requires Paseo 0.12.0 or newer on this host and in the connected app.
 
 ## What it reads and stores
 

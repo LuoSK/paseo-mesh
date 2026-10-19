@@ -1,41 +1,34 @@
-# Releasing
+# Releasing the maintained fork
 
-Releases are cut from `main` by pushing a `vX.Y.Z` tag. The `Release` workflow checks that the tag matches `package.json`, runs every check including the end-to-end suite, publishes to npm through trusted publishing, and creates a GitHub release from the matching `CHANGELOG.md` section.
+This fork is distributed through `LuoSK/paseo-mesh`, not npm. `package.json` is private to prevent accidental publication under the upstream package name. Retain the upstream MIT license and attribution.
 
-## Steps
+## Prepare a version
 
-1. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading and update the compare links.
-2. Bump the version in `package.json` and `shared/version.ts` (`npm test` fails if they differ), then run `npm install` to refresh the lockfile.
-3. If the release needs newer Paseo APIs, raise `requirements.paseo` in `paseo-plugin.json` and the `@getpaseo/*` ranges together. Keep `PASEO_CLIENT_APP_VERSION` equal to the `@getpaseo/client` range floor.
-4. Run the checks locally (see [CONTRIBUTING.md](../CONTRIBUTING.md)), commit, and push to `main`.
-5. Tag and push:
+1. Use a fork-specific version such as `0.2.1-blinklab.1` in `package.json` and `shared/version.ts`, and document the changes in `CHANGELOG.md`.
+2. Keep the runtime client/protocol and development CLI/plugin packages on the same reviewed Paseo version. Keep `PASEO_CLIENT_APP_VERSION` and the CLI's `APP_VERSION` aligned with that client version. Refresh and commit `package-lock.json` with npm 10 or 11.
+3. Check `requirements.paseo` and the documented daemon/app minimum before adopting new SDK behavior.
+4. Run `npm run typecheck`, `npm run lint`, `npm test`, `npm run check:memory`, `npm run test:e2e`, and `npm run check:package`.
+5. Create an artifact with `npm pack --pack-destination /path/to/artifacts`. The packing hooks produce a runtime-only `npm-shrinkwrap.json`, remove the Git-only preparation step from the packed manifest, and restore the source manifest afterward. Do not commit the generated shrinkwrap or archives.
+6. Initialize a temporary consumer project with `npm init -y`, install the archive there using `npm install --omit=dev --ignore-scripts /path/to/artifact.tgz`, and run `node scripts/check-memory.mjs /path/to/consumer/node_modules/paseo-mesh` from the source checkout. This tests the published shrinkwrap as a dependency. Do not run `npm ci` in the extracted package root: its runtime-only shrinkwrap deliberately excludes the development dependencies still declared in the package metadata. Never use a production Paseo home for package checks.
 
-   ```bash
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   ```
+The memory regression check uses synthetic messages and forces Maglev only in an isolated child process. The first maintenance fix moves to Paseo 0.12.0's per-message validators; it does not disable optimization in production or modify generated dependency code.
 
-Versions with a prerelease suffix (`1.2.0-beta.1`) publish under the npm `next` tag and are marked as prereleases on GitHub.
+## Commit and distribute
 
-## npm
+Push only reviewed source, tests, documentation, workflows and the lockfile. Never include pairing offers, host configuration, passwords, agent histories or runtime state.
 
-The workflow publishes with [trusted publishing](https://docs.npmjs.com/trusted-publishers): npm accepts the job's GitHub OIDC token, so there is no npm token secret, and every release carries provenance. The trust relationship is bound to this repository and the `release.yml` workflow filename; renaming the workflow breaks publishing until the relationship is updated:
+The inherited GitHub workflows are unchanged because the current GitHub credential has no `workflow` permission. Run the memory check and archive-installation check manually before every dependency update. Do not push version tags from this fork: the inherited Release workflow still targets upstream npm publishing, and this fork's private package flag intentionally blocks that operation. Build and retain the verified archive manually; no npm publication or automatic artifact release is configured for this maintenance version.
+
+Fresh Git installation from a reviewed revision:
 
 ```bash
-npx npm@latest trust list paseo-mesh
-npx npm@latest trust github paseo-mesh --file release.yml --repository jtsang4/paseo-mesh --allow-publish
+paseo plugin install git:LuoSK/paseo-mesh --ref <commit-or-tag> --id mesh
 ```
 
-Both commands need an npm login with 2FA; older npm 11 releases answer the second with a bare `400`. A version that is already on npm is skipped, so re-running a release only creates the GitHub release.
+Keep the `mesh` installation ID and existing `PASEO_HOME`. Paseo rejects installing over an existing ID. For a source migration, privately back up the current installation and state, run `paseo plugin remove mesh`, and then run the installation command above. Removal clears the managed plugin and generic plugin settings; Mesh stores its peers, caller identities and preferred MCP port separately in `$PASEO_HOME/paseo-mesh/`. Do not delete or recreate that directory. If the new installation fails, reinstall the privately backed-up old source under the same ID. A cutover briefly interrupts Mesh requests and notifications; obtain approval before changing a running installation. No daemon restart is needed.
 
-npm reviews new versions before they go live. The publish request returns `202 Accepted`, the package page shows a holding version for a few minutes, and `npm view` may lag behind. Wait for `npm view paseo-mesh@X.Y.Z version` before announcing a release.
+After installation, require `running` in `paseo plugin ls`, verify the installed source revision and runtime dependency versions, exercise local tools and an authorized reachable peer, and observe the new plugin process's memory after traffic. Do not treat a fresh process's low initial memory as proof of the fix.
 
-## Paseo registry
+## Follow upstream
 
-The plugin is listed as [`jtsang4/mesh`](https://paseo.sh/plugins/jtsang4/mesh) with the npm package as its artifact. After a release reaches npm, the registry's bump workflow opens a PR that pins the new version; it reaches `paseo plugin add jtsang4/mesh` users once a maintainer merges it. `OVERVIEW.md` and the manifest `media` in the package are the listing; update them in the same release when behavior users see changes.
-
-The registry rejects npm artifacts without a locked dependency tree. `prepack` writes `npm-shrinkwrap.json` with the runtime closure of `package-lock.json` (`scripts/shrinkwrap.mjs`), and `npm run check:package` fails if the tarball lacks it or any entry is unpinned. Do not commit the shrinkwrap: npm would prefer it over `package-lock.json` for Git installs and development.
-
-## Compatibility
-
-The `Paseo compatibility` workflow runs weekly against the newest `@getpaseo/*` packages. When it fails, fix the incompatibility, raise the dependency ranges, and release.
+Keep `upstream` pointing to `https://github.com/jtsang4/paseo-mesh.git`. Review upstream changes before merging them into the fork, preserving its lockfile, manual memory regression and private-package policy. The inherited compatibility workflow tests newer Paseo dependencies without changing the reviewed production lock; it does not automatically deploy them or run this fork's new memory check.

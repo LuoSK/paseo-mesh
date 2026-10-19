@@ -1,5 +1,7 @@
 # paseo-mesh
 
+This is the Blinklab maintenance fork of [jtsang4/paseo-mesh](https://github.com/jtsang4/paseo-mesh). It pins Paseo client/protocol 0.12.0 to avoid the old monolithic validator's Maglev compilation memory spikes. Packages are distributed through this repository, not published to npm; the original MIT license and attribution are retained.
+
 A [Paseo](https://paseo.sh) plugin that lets agents on one Paseo host see and drive agents on your other hosts.
 
 Paseo's built-in orchestration (`create_agent`, `send_agent_prompt`, finish notifications) works inside one daemon. paseo-mesh extends it across machines: an agent on your laptop can list the agents on your GPU box, read their timelines, start new agents there, send follow-ups, answer their permission requests, and get a message when they finish.
@@ -31,7 +33,7 @@ Only the orchestrating host needs the plugin. Peers are ordinary Paseo daemons y
 
 ## Requirements
 
-- Paseo daemon 0.11.0 or newer on the orchestrating host, with plugins enabled.
+- Paseo daemon and app 0.12.0 or newer on the orchestrating host, with plugins enabled.
 - Peers: any Paseo daemon the orchestrating host can reach through the relay or directly.
 - Node.js and npm on the orchestrating host for Git installs (Paseo runs `npm ci --omit=dev` to install the plugin's dependencies).
 
@@ -40,17 +42,15 @@ Only the orchestrating host needs the plugin. Peers are ordinary Paseo daemons y
 Plugins run unsandboxed with the daemon user's access. Install only code you trust.
 
 1. Enable plugins on the orchestrating host: **Settings → Plugins → Enable plugins** in the app, or set `"pluginsEnabled": true` in `~/.paseo/config.json` and run `paseo reload`.
-2. Install from the [Paseo plugin directory](https://paseo.sh/plugins/jtsang4/mesh), which installs the reviewed revision:
+2. Install this maintained fork from GitHub, retaining the `mesh` installation ID so existing peer configuration and agent tool URLs remain in use:
 
    ```bash
-   paseo plugin add jtsang4/mesh
+   paseo plugin install git:LuoSK/paseo-mesh --id mesh
    ```
 
-   or straight from GitHub (`paseo plugin add git:jtsang4/paseo-mesh`) or from npm:
+   To install a reviewed revision, add `--ref <commit-or-tag>`. Do not use the upstream registry/npm commands for this fork.
 
-   ```bash
-   paseo plugin install npm:paseo-mesh
-   ```
+   When switching an existing installation to this fork, first make a private backup of its source and `$PASEO_HOME/paseo-mesh/`, then run `paseo plugin remove mesh` before the install command. Paseo rejects installing over a configured ID. Removal deletes the old managed plugin and its generic settings, but not Mesh's separate peer/caller/MCP-port state directory. Do not delete that directory. The cutover briefly interrupts Mesh tools and notifications; no daemon restart is needed.
 
 3. Check it is running:
 
@@ -91,10 +91,10 @@ paseo daemon pair            # prints https://app.paseo.sh/#offer=...
 Treat the link like a password: it lets its holder control that daemon. Then add the peer in the app (**Settings → Plugins → mesh → Peers → Add a peer**) or from a terminal:
 
 ```bash
-npx paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
-npx paseo-mesh peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
-npx paseo-mesh peers add devbox 'ssh://dev@devbox-cn?daemonPort=6767'
-npx paseo-mesh status
+node bin/paseo-mesh.mjs peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
+node bin/paseo-mesh.mjs peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
+node bin/paseo-mesh.mjs peers add devbox 'ssh://dev@devbox-cn?daemonPort=6767'
+node bin/paseo-mesh.mjs status
 ```
 
 | Connection | Use it when |
@@ -243,7 +243,7 @@ paseo-mesh peers retry <peer>
 paseo-mesh settings [--inject|--no-inject] [--preapprove|--no-preapprove] [--local-access read|write]
 ```
 
-Run it with `npx paseo-mesh <command>`. Target another daemon with `--home <path>` or `--host <host:port>` (password from `PASEO_PASSWORD`). Add `--json` for machine-readable output.
+Run the maintained CLI from a checkout of this repository after `npm ci --omit=dev`: `node bin/paseo-mesh.mjs <command>`. Target another daemon with `--home <path>` or `--host <host:port>` (password from `PASEO_PASSWORD`). Add `--json` for machine-readable output.
 
 ## Limitations
 

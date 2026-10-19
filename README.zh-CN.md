@@ -1,5 +1,7 @@
 # paseo-mesh
 
+这是 [jtsang4/paseo-mesh](https://github.com/jtsang4/paseo-mesh) 的 Blinklab 维护分支。通信库固定使用 Paseo 0.12.0，避免旧版巨型消息校验函数触发 Maglev 编译内存高峰。通过本仓库分发安装包，不发布到 npm；保留原 MIT 许可证及作者署名。
+
 一个 [Paseo](https://paseo.sh) 插件。装了它之后，一台 Paseo host 上的 agent 可以查看和驱动你其他 host 上的 agent。
 
 Paseo 自带的编排能力（`create_agent`、`send_agent_prompt`、完成通知）只在单个 daemon 内有效。paseo-mesh 把它扩展到多台机器：笔记本上的 agent 可以列出 GPU 服务器上的 agent，读取它们的时间线，在那边创建新 agent、发送后续指令、处理它们的权限请求，并在它们完成时收到消息。
@@ -31,7 +33,7 @@ Paseo 自带的编排能力（`create_agent`、`send_agent_prompt`、完成通�
 
 ## 环境要求
 
-- 编排 host 上的 Paseo daemon 为 0.11.0 或更新，并且开启了插件。
+- 编排 host 上的 Paseo daemon 与 App 为 0.12.0 或更新，并且开启了插件。
 - peer：编排 host 能通过 relay 或直连访问到的任意 Paseo daemon。
 - 用 Git 安装时，编排 host 上需要 Node.js 和 npm（Paseo 会运行 `npm ci --omit=dev` 安装插件依赖）。
 
@@ -40,17 +42,15 @@ Paseo 自带的编排能力（`create_agent`、`send_agent_prompt`、完成通�
 插件不在沙箱里运行，拥有 daemon 用户的全部权限。只安装你信任的代码。
 
 1. 在编排 host 上开启插件：App 里打开 **Settings → Plugins → Enable plugins**，或在 `~/.paseo/config.json` 里设置 `"pluginsEnabled": true` 后运行 `paseo reload`。
-2. 从 [Paseo 插件目录](https://paseo.sh/plugins/jtsang4/mesh) 安装（会安装经过审核的版本）：
+2. 从维护仓库安装，保留 `mesh` 安装 ID，以继续使用现有主机配置和会话工具地址：
 
    ```bash
-   paseo plugin add jtsang4/mesh
+   paseo plugin install git:LuoSK/paseo-mesh --id mesh
    ```
 
-   也可以直接从 GitHub（`paseo plugin add git:jtsang4/paseo-mesh`）或 npm 安装：
+   如需固定已审核的版本，追加 `--ref <提交编号或标签>`。本维护版不要使用上游插件目录或 npm 的安装命令。
 
-   ```bash
-   paseo plugin install npm:paseo-mesh
-   ```
+   从现有安装切换时，先私下备份旧插件源码及 `$PASEO_HOME/paseo-mesh/`，再运行 `paseo plugin remove mesh`，然后执行上面的安装命令。Paseo 不允许直接覆盖已配置的 ID。移除操作会删除旧托管插件和通用插件设置，但不会删除 Mesh 独立保存的主机、调用者及 MCP 端口状态目录；不要删除这个目录。切换会短暂中断 Mesh 工具和通知，不需要重启 Paseo daemon。
 
 3. 确认它在运行：
 
@@ -90,11 +90,13 @@ paseo daemon pair            # 输出 https://app.paseo.sh/#offer=...
 
 配对链接要像密码一样保管：拿到它就能控制那台 daemon。然后在编排 host 上添加 peer，可以在 App 里操作（**Settings → Plugins → mesh → Peers → Add a peer**），也可以用命令行：
 
+以下命令从本维护仓库的源码目录运行，先执行 `npm ci --omit=dev` 安装锁定依赖；这样不会通过 `npx` 意外运行 npm 上的旧版插件。
+
 ```bash
-npx paseo-mesh peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
-npx paseo-mesh peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
-npx paseo-mesh peers add devbox 'ssh://dev@devbox-cn?daemonPort=6767'
-npx paseo-mesh status
+node bin/paseo-mesh.mjs peers add gpu-box 'https://app.paseo.sh/#offer=...' --write
+node bin/paseo-mesh.mjs peers add office-mac 100.64.0.7:6767 --password-stdin < password.txt
+node bin/paseo-mesh.mjs peers add devbox 'ssh://dev@devbox-cn?daemonPort=6767'
+node bin/paseo-mesh.mjs status
 ```
 
 | 连接方式 | 适用场景 |
